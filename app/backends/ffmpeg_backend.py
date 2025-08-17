@@ -56,7 +56,6 @@ class FClip:
             v = (
                 ffmpeg
                 .input(image_path, loop=loop, framerate=fps)
-                .filter("scale", *scale_args)
             )
 
             # Build audio stream
@@ -123,8 +122,10 @@ class Timeline:
         transition: str = "fade",      # video transition type
         audio_fade: str = "acrossfade",# audio transition type
         overwrite: bool = True,        # whether to overwrite existing output
-        verbose: bool = False,         # print ffmpeg logs
-        sar: int = 1                   # 👈 configurable SAR, default 1
+        verbose: bool = True,         # print ffmpeg logs
+        sar: int = 1,                  # configurable SAR, default 1
+        max_w: Optional[int] = None,   # max width
+        max_h: int = 1080              # max height
         
     ) -> Path:
         """
@@ -147,7 +148,15 @@ class Timeline:
                                   audio_fade, d=fade_s)
 
             # ✅ Apply setsar ONCE at the end
-            v = v.filter("format", pix_fmt).filter("setsar", sar)
+            v = (
+                    v
+                    .filter("scale",
+                            f"min({max_w},iw)" if max_w else -1,
+                            f"min({max_h},ih)" if max_h else -1)
+                    .filter("format", pix_fmt)
+                    .filter("setsar", sar)
+                )
+
 
             # Run ffmpeg
             with Timer(f"Rendering {out_path}"):
