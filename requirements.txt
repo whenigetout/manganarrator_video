@@ -1,0 +1,6 @@
+ffmpeg-python
+fastapi
+uvicorn
+pydantic>=2
+PyYAML
+rich
