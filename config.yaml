@@ -1,17 +1,30 @@
 name: manganarrator_video
 
-render:
-  fps: 24
-  size: [1280, 720]
-  crossfade_s: 0.5
-  vcodec: h264_nvenc
-  cq: 23
-  nvenc_preset: p5
-  nvenc_tune: hq
-  pix_fmt: yuv420p
-  max_height: 4096
+clips:
+  - image: "inputs/scene1.png"
+    audio: "inputs/scene1.wav"
+    fps: 24
+    max_h: 1080
+    max_w: 1920
+    loop: 1
+    pix_fmt: "yuv420p"
+    sar: 1
+  - image: "inputs/scene2.png"
+    audio: "inputs/scene2.wav"
+    fps: 24
+    max_h: 1080
+    loop: 1
 
-paths:
-  input_images: input/images
-  input_audio: input/audio
-  output_dir: output
+render:
+  out_path: "outputs/final_video.mp4"
+  fps: 30
+  vcodec: "h264_nvenc"
+  cq: 23
+  preset: "p5"
+  tune: "hq"
+  pix_fmt: "yuv420p"
+  fade_s: 0.5
+  transition: "fade"
+  audio_fade: "acrossfade"
+  overwrite: true
+  verbose: true
