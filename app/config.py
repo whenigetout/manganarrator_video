@@ -36,6 +36,15 @@ class VideoConfig:
             self.overwrite = self.config.get("overwrite", True)
             self.verbose = self.config.get("verbose", False)
 
+            # NEW: process capture flags
+            self.capture_stderr = self.config.get("capture_stderr", True)
+            self.capture_stdout = self.config.get("capture_stdout", False)
+
+            self.max_width = self.config.get("max_width", 1080)
+            self.max_height = self.config.get("max_height", 1920)
+            self.input_root = self.config.get("input_root", None)
+            self.output_root = self.config.get("output_root", None)
+
             # Run validation automatically
             self.validate()
 

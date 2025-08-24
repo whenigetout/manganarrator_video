@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 import uuid
+from typing import Optional
 
 from app.backends.ffmpeg_backend import FClip, Timeline
 from app.utils import Timer, log_exception, ensure_folder
@@ -16,20 +17,48 @@ class VideoRunner:
         self.output_dir = Path(config.output_folder)
         ensure_folder(self.output_dir)
 
-    def _build_clips(self, image_path: str | Path, audio_files: list[str | Path]) -> list[FClip]:
+    def _build_clips(
+        self,
+        image_path: str | Path,
+        audio_files: list[str | Path],
+        *,
+        pan_plan: list[dict] | None = None,      # NEW
+        loop: Optional[int] = None,
+        fps: Optional[int] = None,
+        max_h: Optional[int] = None,
+        max_w: Optional[int] = None,
+        sar: Optional[int] = None,
+        pix_fmt: Optional[str] = None,
+        verbose: Optional[bool] = None,
+        capture_stderr: Optional[bool] = None,
+        capture_stdout: Optional[bool] = None,
+    ) -> list[FClip]:
         """
         Build a list of FClip objects: one image reused for all audio files.
+        Now also applies per-dialogue crop offsets from pan_plan.
         """
         clips = []
-        for audio_path in audio_files:
+        for idx, audio_path in enumerate(audio_files):
             try:
+                offset_y = 0
+                if pan_plan and idx < len(pan_plan):
+                    offset_y = int(pan_plan[idx].get("offset", 0))
+
                 clip = FClip.from_image_audio(
                     image_path=str(image_path),
                     audio_path=str(audio_path),
-                    loop=self.config.loop,
-                    fps=self.config.default_fps,
-                    max_h=self.config.max_height,
-                    max_w=self.config.max_width,
+                    loop=loop if loop is not None else self.config.loop,
+                    fps=fps if fps is not None else self.config.default_fps,
+                    max_h=max_h if max_h is not None else self.config.max_height,
+                    max_w=max_w if max_w is not None else self.config.max_width,
+                    sar=sar if sar is not None else self.config.sar,
+                    pix_fmt=pix_fmt if pix_fmt is not None else self.config.pix_fmt,
+                    verbose=verbose if verbose is not None else self.config.verbose,
+                    capture_stderr=capture_stderr if capture_stderr is not None else True,
+                    capture_stdout=capture_stdout if capture_stdout is not None else False,
+                    offset_y=offset_y,                               # NEW
+                    viewport_h=max_h if max_h is not None else self.config.max_height,  # NEW
+                    viewport_w=max_w if max_w is not None else self.config.max_width,   # NEW
                 )
                 clips.append(clip)
             except Exception:
@@ -37,47 +66,94 @@ class VideoRunner:
                 raise
         return clips
 
+
     def run_single_img(
         self,
         image_path: str | Path,
         audio_files: list[str | Path],
         run_id: str | None = None,
-        out_filename: str = "final.mp4"
+        out_filename: str = "final.mp4",
+        *,
+        pan_plan: list[dict] | None = None,
+        output_dir: str | Path | None = None,
+        # Overrides for backend parameters
+        fps: Optional[int] = None,
+        vcodec: Optional[str] = None,
+        cq: Optional[int] = None,
+        preset: Optional[str] = None,
+        tune: Optional[str] = None,
+        pix_fmt: Optional[str] = None,
+        fade_s: Optional[float] = None,
+        transition: Optional[str] = None,
+        audio_fade: Optional[str] = None,
+        overwrite: Optional[bool] = None,
+        verbose: Optional[bool] = None,
+        sar: Optional[int] = None,
+        max_w: Optional[int] = None,
+        max_h: Optional[int] = None,
+        loop: Optional[int] = None,
+        capture_stderr: Optional[bool] = None,
+        capture_stdout: Optional[bool] = None,
     ) -> dict:
         """
         Run the video pipeline with one image and multiple audio files.
+        All parameters are configurable; explicit overrides take precedence.
         """
-        # Generate run_id
+        # Generate run_id (still used for metadata if no explicit output_dir)
         if not run_id:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             run_id = f"video_{timestamp}_{uuid.uuid4().hex[:8]}"
 
-        out_dir = self.output_dir / run_id
+        # Decide where to write: caller-provided output_dir OR default {config.output_folder}/{run_id}
+        if output_dir is not None:
+            out_dir = Path(output_dir)
+        else:
+            out_dir = self.output_dir / run_id
         ensure_folder(out_dir)
 
-        # Build clips
-        clips = self._build_clips(image_path, audio_files)
+        # Build clips with overrides
+        clips = self._build_clips(
+            image_path,
+            audio_files,
+            pan_plan=pan_plan,
+            loop=loop,
+            fps=fps,
+            max_h=max_h,
+            max_w=max_w,
+            sar=sar,
+            pix_fmt=pix_fmt,
+            verbose=verbose,
+            capture_stderr=capture_stderr,
+            capture_stdout=capture_stdout,
+        )
         timeline = Timeline(clips)
 
         # Output path
         out_path = out_dir / out_filename
 
+        # Merge overrides with config
+        params = {
+            "fps": fps if fps is not None else self.config.default_fps,
+            "vcodec": vcodec if vcodec is not None else self.config.vcodec,
+            "cq": cq if cq is not None else self.config.cq,
+            "preset": preset if preset is not None else self.config.preset,
+            "tune": tune if tune is not None else self.config.tune,
+            "pix_fmt": pix_fmt if pix_fmt is not None else self.config.pix_fmt,
+            # "fade_s": fade_s if fade_s is not None else self.config.fade_s,
+            # "transition": transition if transition is not None else self.config.transition,
+            # "audio_fade": audio_fade if audio_fade is not None else self.config.audio_fade,
+            "overwrite": overwrite if overwrite is not None else self.config.overwrite,
+            "verbose": verbose if verbose is not None else self.config.verbose,
+            # "sar": sar if sar is not None else self.config.sar,
+            # "max_w": max_w if max_w is not None else self.config.max_width,
+            # "max_h": max_h if max_h is not None else self.config.max_height,
+            "capture_stderr": capture_stderr if capture_stderr is not None else self.config.capture_stderr,
+            "capture_stdout": capture_stdout if capture_stdout is not None else self.config.capture_stdout,
+        }
+
         # Render
         with Timer(f"🎬 Rendering video to {out_path}"):
-            result = timeline.render(
-                out_path=out_path,
-                fps=self.config.default_fps,
-                vcodec=self.config.vcodec,
-                cq=self.config.cq,
-                preset=self.config.preset,
-                tune=self.config.tune,
-                pix_fmt=self.config.pix_fmt,
-                fade_s=self.config.fade_s,
-                transition=self.config.transition,
-                audio_fade=self.config.audio_fade,
-                overwrite=self.config.overwrite,
-                verbose=self.config.verbose,
-            )
+            result = timeline.render(out_path=out_path, **params)
 
         return {
             "runid": run_id,
