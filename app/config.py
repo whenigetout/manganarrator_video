@@ -44,6 +44,11 @@ class VideoConfig:
             self.max_height = self.config.get("max_height", 1920)
             self.input_root = self.config.get("input_root", None)
             self.output_root = self.config.get("output_root", None)
+            self.first_dialog_margin_pct = self.config.get("first_dialog_margin_pct", None)
+            self.pre_roll_seconds = self.config.get("pre_roll_seconds", None)
+            self.post_roll_seconds = self.config.get("post_roll_seconds", None)
+            self.side_margin_px = self.config.get("side_margin_px", None)
+            self.keep_segments = self.config.get("keep_segments", None)
 
             # Run validation automatically
             self.validate()

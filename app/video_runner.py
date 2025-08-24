@@ -29,6 +29,7 @@ class VideoRunner:
         max_w: Optional[int] = None,
         sar: Optional[int] = None,
         pix_fmt: Optional[str] = None,
+        side_margin_px: Optional[int] = None,
         verbose: Optional[bool] = None,
         capture_stderr: Optional[bool] = None,
         capture_stdout: Optional[bool] = None,
@@ -58,7 +59,8 @@ class VideoRunner:
                     capture_stdout=capture_stdout if capture_stdout is not None else False,
                     offset_y=offset_y,                               # NEW
                     viewport_h=max_h if max_h is not None else self.config.max_height,  # NEW
-                    viewport_w=max_w if max_w is not None else self.config.max_width,   # NEW
+                    viewport_w=max_w if max_w is not None else self.config.max_width,   # NEW,
+                    side_margin_px=side_margin_px
                 )
                 clips.append(clip)
             except Exception:
@@ -76,6 +78,7 @@ class VideoRunner:
         *,
         pan_plan: list[dict] | None = None,
         output_dir: str | Path | None = None,
+        side_margin_px: Optional[int] = None,
         # Overrides for backend parameters
         fps: Optional[int] = None,
         vcodec: Optional[str] = None,
@@ -94,6 +97,7 @@ class VideoRunner:
         loop: Optional[int] = None,
         capture_stderr: Optional[bool] = None,
         capture_stdout: Optional[bool] = None,
+        keep_segments: Optional[bool] = None
     ) -> dict:
         """
         Run the video pipeline with one image and multiple audio files.
@@ -122,6 +126,7 @@ class VideoRunner:
             max_w=max_w,
             sar=sar,
             pix_fmt=pix_fmt,
+            side_margin_px=side_margin_px,
             verbose=verbose,
             capture_stderr=capture_stderr,
             capture_stdout=capture_stdout,
@@ -149,6 +154,8 @@ class VideoRunner:
             # "max_h": max_h if max_h is not None else self.config.max_height,
             "capture_stderr": capture_stderr if capture_stderr is not None else self.config.capture_stderr,
             "capture_stdout": capture_stdout if capture_stdout is not None else self.config.capture_stdout,
+            "side_margin_px": side_margin_px if side_margin_px is not None else self.config.side_margin_px,
+            "keep_segments": keep_segments if keep_segments is not None else self.config.keep_segments,
         }
 
         # Render

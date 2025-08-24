@@ -19,3 +19,8 @@ max_width: 1080
 max_height: 1920
 input_root: "E:/pcc_shared/manga_narrator_runs/inputs"
 output_root: "E:/pcc_shared/manga_narrator_runs/outputs"
+first_dialog_margin_pct: 0.02     # 2% of viewport height above the first bubble
+pre_roll_seconds: 2.0             # optional scroll before first bubble (silence)
+post_roll_seconds: 2.0            # optional scroll after last bubble (silence)
+side_margin_px: 50                   # pillarbox margins (each side), 0 = none
+keep_segments: False               # keep seg_*.mp4 + files.txt after concat?
