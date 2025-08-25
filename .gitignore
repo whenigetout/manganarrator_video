@@ -336,6 +336,11 @@ local_tmp/*
 output/*
 input/*
 
+# Keep the folder itself with an empty placeholder
+!local_tmp/.gitkeep
+!output/.gitkeep
+!input/.gitkeep
+
 __pycache__/
 *.pyc
 .DS_Store
