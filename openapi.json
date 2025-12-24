@@ -1,0 +1,221 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "FastAPI",
+        "version": "0.1.0"
+    },
+    "paths": {
+        "/video/runs/{run_id}/previews": {
+            "get": {
+                "summary": "Get Run Previews",
+                "description": "Return preview data (pan offsets + crop boxes) for all images in a run.\nThis does NOT run ffmpeg or build video.",
+                "operationId": "get_run_previews_video_runs__run_id__previews_get",
+                "parameters": [
+                    {
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Run Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ImagePreviewOut"
+                                    },
+                                    "title": "Response Get Run Previews Video Runs  Run Id  Previews Get"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/video/runs/{run_id}/build": {
+            "post": {
+                "summary": "Build Video Run",
+                "description": "Trigger actual video generation for a run.\nThis WILL run ffmpeg and take time.",
+                "operationId": "build_video_run_video_runs__run_id__build_post",
+                "parameters": [
+                    {
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Run Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "DialoguePreviewOut": {
+                "properties": {
+                    "dialogue_id": {
+                        "type": "integer",
+                        "title": "Dialogue Id"
+                    },
+                    "dialogue_text": {
+                        "type": "string",
+                        "title": "Dialogue Text"
+                    },
+                    "pan_offset": {
+                        "type": "integer",
+                        "title": "Pan Offset"
+                    },
+                    "crop_box": {
+                        "prefixItems": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "integer"
+                            }
+                        ],
+                        "type": "array",
+                        "maxItems": 4,
+                        "minItems": 4,
+                        "title": "Crop Box"
+                    },
+                    "bbox_y": {
+                        "type": "integer",
+                        "title": "Bbox Y"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "dialogue_id",
+                    "dialogue_text",
+                    "pan_offset",
+                    "crop_box",
+                    "bbox_y"
+                ],
+                "title": "DialoguePreviewOut"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "ImagePreviewOut": {
+                "properties": {
+                    "image_id": {
+                        "type": "string",
+                        "title": "Image Id"
+                    },
+                    "image_file_name": {
+                        "type": "string",
+                        "title": "Image File Name"
+                    },
+                    "image_rel_path_from_root": {
+                        "type": "string",
+                        "title": "Image Rel Path From Root"
+                    },
+                    "previews": {
+                        "items": {
+                            "$ref": "#/components/schemas/DialoguePreviewOut"
+                        },
+                        "type": "array",
+                        "title": "Previews"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "image_id",
+                    "image_file_name",
+                    "image_rel_path_from_root",
+                    "previews"
+                ],
+                "title": "ImagePreviewOut"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}

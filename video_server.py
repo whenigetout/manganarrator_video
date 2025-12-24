@@ -10,7 +10,8 @@ from app.chapter_video_builder import (
     ChapterVideoBuilder,
     build_dialogue_previews,
 )
-from app.types import OCRRun, OCRImageResult
+from app.models.domain import OCRRun, OCRImageResult
+from app.models.api import DialoguePreviewOut, ImagePreviewOut
 
 
 # -----------------------------------------------------------------------------
@@ -31,30 +32,15 @@ config = VideoConfig()
 runner = VideoRunner(config)
 builder = ChapterVideoBuilder(config)
 
-# -----------------------------------------------------------------------------
-# Response models (API-facing only)
-# -----------------------------------------------------------------------------
-
-class DialoguePreviewOut(BaseModel):
-    dialogue_id: int
-    dialogue_text: str
-    pan_offset: int
-    crop_box: Tuple[int, int, int, int]
-    bbox_y: int
-
-
-class ImagePreviewOut(BaseModel):
-    image_id: str
-    image_file_name: str
-    image_rel_path_from_root: str
-    previews: List[DialoguePreviewOut]
-
 
 # -----------------------------------------------------------------------------
 # Preview endpoints
 # -----------------------------------------------------------------------------
 
-@app.get("/video/runs/{run_id}/previews", response_model=List[ImagePreviewOut])
+@app.get(
+        "/video/runs/{run_id}/previews", 
+        response_model=List[ImagePreviewOut]
+    )
 def get_run_previews(run_id: str):
     """
     Return preview data (pan offsets + crop boxes) for all images in a run.

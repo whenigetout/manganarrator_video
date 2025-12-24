@@ -60,14 +60,6 @@ class OCRRun(BaseModel):
     json_path: Path
     images: List[OCRImageResult]
 
-    @property
-    def filename(self) -> str:
-        return self.json_path.name
-
-    @property
-    def parent_dir(self) -> Path:
-        return self.json_path.parent
-
     @classmethod
     def from_json_file(cls, path: Path) -> "OCRRun":
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -79,19 +71,3 @@ class OCRRun(BaseModel):
             json_path=path,
             images=[OCRImageResult.model_validate(x) for x in data],
         )
-
-
-class DialoguePreview(BaseModel):
-    dialogue_id: int
-    dialogue_text: str
-
-    image_path: Path
-
-    pan_offset: int
-    viewport_size: Tuple[int, int]   # (width, height)
-    scaled_image_size: Tuple[int, int]
-
-    crop_box: Tuple[int, int, int, int]
-    # (x1, y1, x2, y2) in scaled image coords
-
-    bbox_y: int  # original bbox y1 (for debugging)
