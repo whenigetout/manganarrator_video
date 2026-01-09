@@ -9,8 +9,7 @@ from app.video_runner import VideoRunner
 from app.chapter_video_builder import (
     ChapterVideoBuilder
 )
-from app.models.domain import OCRRun, OCRImageResult, RenderConfig
-from app.models.api import DialoguePreviewOut, ImagePreviewOut
+import mn_contracts.ocr as o
 
 
 # -----------------------------------------------------------------------------

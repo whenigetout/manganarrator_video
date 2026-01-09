@@ -7,6 +7,8 @@ from typing import Optional
 import subprocess, shlex
 import app.models.domain as d
 import app.models.api as a
+import mn_contracts.ocr as o
+import app.models.exceptions as ex
 
 class ChapterVideoBuilder:
     def __init__(self, config: VideoConfig, resolution=(1080,1920), safe_margin=200):
@@ -34,7 +36,7 @@ class ChapterVideoBuilder:
 
     def _collect_paths(
         self,
-        run: OCRRun,
+        run: o.OCRRun,
     ) -> List[Tuple[Path, List[Path]]]:
         """
         For each image in the OCR run, return:
@@ -43,82 +45,33 @@ class ChapterVideoBuilder:
         """
         collected: List[Tuple[Path, List[Path]]] = []
 
-        for img in run.images:
-            # ---- resolve image path ----
-            image_path = (
-                Path(str(self.config.input_root))
-                / img.image_rel_path_from_root
-                / img.image_file_name
-            )
+        # for img in run.images:
+        #     # ---- resolve image path ----
+        #     image_path = (
+        #         Path(str(self.config.input_root))
+        #         / img.image_rel_path_from_root
+        #         / img.image_file_name
+        #     )
 
-            # ---- resolve dialogue audio paths ----
-            image_audio_root = (
-                run.json_path.parent
-                / f"{Path(img.image_file_name).stem}_jpg"
-            )
+        #     # ---- resolve dialogue audio paths ----
+        #     image_audio_root = (
+        #         run.json_path.parent
+        #         / f"{Path(img.image_file_name).stem}_jpg"
+        #     )
 
-            dialogue_audios: List[Path] = []
+        #     dialogue_audios: List[Path] = []
 
-            for dlg in img.parsed_dialogue:
-                dlg_dir = image_audio_root / f"dialogue__{dlg.id}"
-                audio_path = self._latest_audio(dlg_dir)
-                dialogue_audios.append(audio_path)
+        #     for dlg in img.parsed_dialogue:
+        #         dlg_dir = image_audio_root / f"dialogue__{dlg.id}"
+        #         audio_path = self._latest_audio(dlg_dir)
+        #         dialogue_audios.append(audio_path)
 
-            collected.append((image_path, dialogue_audios))
+        #     collected.append((image_path, dialogue_audios))
 
         return collected
 
-    def _make_pan_plan(self, img: OCRImageResult) -> List[Dict[str, Any]]:
-        """
-        Compute a monotonic top->bottom pan plan using dialogue bboxes.
-        - Starts slightly ABOVE the first dialogue (first_dialog_margin_pct of viewport height).
-        - Uses *scaled* image height to clamp offsets (since we scale to self.res_w).
-        - Ensures offset never decreases (monotonic pan).
-        Returns: list of {"dlg_id": int, "offset": int}
-        """
-        raw_w = int(img.image_width)
-        raw_h = int(img.image_height)
-
-        # After we scale to viewport width (self.res_w), height scales proportionally
-        scaled_h = int(raw_h * self.res_w / raw_w)
-        max_offset = max(0, scaled_h - self.res_h)
-
-        dialogs = [d for d in img.parsed_dialogue if d.paddle_bbox]
-        plan: List[Dict[str, Any]] = []
-
-        cur_offset = 0
-        first_margin_pct = getattr(self.config, "first_dialog_margin_pct", 0.02)
-        try:
-            first_margin_pct = float(first_margin_pct)
-        except Exception:
-            first_margin_pct = 0.02
-        first_margin = int(self.res_h * first_margin_pct)
-
-
-        for idx, dlg in enumerate(dialogs):
-            y = int(dlg.paddle_bbox.y1)
-            # scale y to match the scaled image height
-            y_scaled = int(y * self.res_w / raw_w)
-
-            if idx == 0:
-                # start a little above the first bubble
-                offset = max(0, y_scaled - first_margin)
-            else:
-                # keep offset non-decreasing; aim to bring the next bubble into view
-                if y_scaled < cur_offset:
-                    offset = cur_offset
-                else:
-                    offset = max(0, y_scaled - self.safe_margin)
-
-            # clamp to the scaled image height bottom
-            offset = min(offset, max_offset)
-            cur_offset = offset
-            plan.append({"dlg_id": dlg.id, "offset": offset})
-
-        return plan
-
     def build_chapter(self, 
-                      run: OCRRun, 
+                      run: o.OCRRun, 
                       version: int,
                       *,
                       out_dir: Optional[Path] = None,
@@ -131,7 +84,7 @@ class ChapterVideoBuilder:
         # ---- collect image + dialogue audio paths (unchanged helpers) ----
         res = []
         img_and_audio = self._collect_paths(run)
-        base_out_dir = out_dir if out_dir else run.json_path.parent / "video_output"
+        base_out_dir = out_dir if out_dir else run.ocr_json_file.parent / "video_output"
 
         for img, (image_path, audio_files) in zip(run.images, img_and_audio):
             if not audio_files:
@@ -344,65 +297,103 @@ class ChapterVideoBuilder:
 
         return results
 
-    def build_dialogue_previews(
+    def build_dialogue_line_preview(
+            self,
+            dlg: o.DialogueLine,
+            img_size: d.Size,
+            frame_size: d.Size,
+            img_scale: float,
+            frame_top_padding: int = 0,
+            prev_preview: Optional[d.DialogueLine_preview] = None
+    ) -> d.DialogueLine_preview:
+        """
+        Compute DialogueLine preview for ocr img dialogue line
+        """
+        try:
+            # error if invalid bbox 
+            if dlg.original_bbox.y1 < 0 or dlg.original_bbox.y1 > img_size.h:
+                raise ex.InvalidInputError(f"Invalid bbox for dlgId: {dlg.id} with text: {dlg.text}")
+
+            bbox_scaled = dlg.original_bbox.scaled(img_scale)
+            y1 = prev_preview.preview_frame.y1 if prev_preview else 0
+            y1 -= frame_top_padding
+            y2 = y1 + frame_size.h
+
+            # bbox is inside the frame/viewport
+            if y1 <= bbox_scaled.y1 and y2 >= bbox_scaled.y2:
+                pass
+            # bbox falls outside the frame/viewport
+            else:
+                y1 = bbox_scaled.y1 - frame_top_padding
+                y2 = y1 + frame_size.h
+
+            # edge case: last bbox is too close to the bottom
+            if y2 > img_size.h * img_scale:
+                y2 = img_size.h * img_scale
+                y1 = y2 - frame_size.h
+
+            preview = d.DialogueLine_preview(
+                **dlg.model_dump(),
+                preview_frame=d.Frame(
+                    x1=0,
+                    y1=int(y1),
+                    x2=frame_size.w,
+                    y2=int(y2),
+                ),
+            )
+
+            return preview
+        except:
+            raise ex.PreviewError
+
+    def build_ocrimg_preview(
         self,
-        img: d.PaddleOCRImage,
+        img: o.OCRImage,
         settings: d.RenderConfig,
-        image_path: Path
-    ) -> List[a.DialoguePreviewOut]:
+    ) -> d.OCRImg_preview:
         """
         Compute preview frames for each dialogue in an image.
         Pure function: no IO, no ffmpeg.
         """
-
-        raw_w = img.image_width
-        raw_h = img.image_height
-
-        # scale image to viewport width (same as video logic)
-        scale = settings.viewport_w / raw_w
-        scaled_w = settings.viewport_w
-        scaled_h = int(raw_h * scale)
-
-        max_offset = max(0, scaled_h - settings.viewport_h)
-
-        dialogs = [d for d in img.parsed_dialogue if d.paddle_bbox]
-        previews: List[DialoguePreviewOut] = []
-
-        cur_offset = 0
-        first_margin = int(settings.viewport_h * settings.first_dialog_margin_pct)
-
-        for idx, dlg in enumerate(dialogs):
-            bbox_y = dlg.paddle_bbox.y1
-            y_scaled = int(bbox_y * scale)
-
-            if idx == 0:
-                offset = max(0, y_scaled - first_margin)
-            else:
-                offset = cur_offset if y_scaled < cur_offset else max(
-                    0, y_scaled - settings.safe_margin
-                )
-
-            offset = min(offset, max_offset)
-            cur_offset = offset
-
-            crop_box = (
-                0,
-                offset,
-                settings.viewport_w,
-                offset + settings.viewport_h,
+        try:
+            img_w, img_h = img.image_info.image_width, img.image_info.image_height
+            img_size = d.Size(
+                w=img_w, 
+                h=img_h
             )
 
-            previews.append(
-                DialoguePreviewOut(
-                    dialogue_id=dlg.id,
-                    dialogue_text=dlg.text,
-                    image_path=str(image_path),
-                    pan_offset=offset,
-                    viewport_size=(settings.viewport_w, settings.viewport_h),
-                    scaled_image_size=(scaled_w, scaled_h),
-                    crop_box=crop_box,
-                    bbox_y=bbox_y,
-                )
+            frame_size = d.Size(
+                w=settings.viewport_w - 2 * settings.side_margin_px,
+                h=settings.viewport_h
             )
 
-        return previews
+            # scale image to viewport width (same as video logic)
+            img_scale = frame_size.w / img_size.w
+
+            dlg_previews: List[d.DialogueLine_preview] = []
+
+            prev_preview = None
+            for dlg in img.dialogue_lines:
+                prev_preview = self.build_dialogue_line_preview(
+                    dlg=dlg,
+                    img_size=img_size,
+                    frame_size=frame_size,
+                    img_scale=img_scale,
+                    frame_top_padding=settings.first_dialog_top_padding,
+                    prev_preview=prev_preview
+                )
+
+                dlg_previews.append(prev_preview)
+
+            result = d.OCRImg_preview(
+                **img.model_dump(),
+                frame_size=frame_size,
+                side_margin_px=settings.side_margin_px,
+                frame_padding_top=settings.first_dialog_top_padding,
+                img_scale=img_scale,
+                dialogue_lines=dlg_previews
+            )
+
+            return result
+        except:
+            raise ex.PreviewError
