@@ -1,16 +1,39 @@
-from pydantic import BaseModel
 from typing import List, Tuple
+from pathlib import Path
 
-class DialoguePreviewOut(BaseModel):
-    dialogue_id: int
-    dialogue_text: str
+import app.models.domain as D
+
+class DialoguePreviewOut(D.PaddleDialogueLineResponse):
+    """
+    API view over a dialogue line.
+    Inherits ALL domain fields:
+    - id
+    - image_id
+    - speaker
+    - gender
+    - emotion
+    - text
+    - paddlebbox
+    """
+
+    # API-only / derived fields
+    viewport_size: Tuple[int, int]
+    scaled_image_size: Tuple[int, int]
     pan_offset: int
     crop_box: Tuple[int, int, int, int]
     bbox_y: int
 
 
-class ImagePreviewOut(BaseModel):
-    image_id: str
-    image_file_name: str
-    image_rel_path_from_root: str
-    previews: List[DialoguePreviewOut]
+class ImagePreviewOut(D.PaddleOCRImage):
+    """
+    API view over an OCR image.
+    Inherits:
+    - image_id
+    - parsedDialogueLines (with paddlebbox)
+    - paddleocr_result
+    """
+
+    # API-only helpers
+
+    # UI-specific projection
+    dialoguePreviews: List[DialoguePreviewOut]

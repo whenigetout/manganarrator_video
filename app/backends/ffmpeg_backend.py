@@ -6,7 +6,12 @@ from typing import Optional, Protocol, runtime_checkable, cast
 import ffmpeg
 
 from app.utils import Timer, log_exception, ensure_folder
-
+from app.models.domain import (
+    ClipSpec,
+    TimelineSpec,
+    RenderConfig,
+    PanStep,
+)
 
 @runtime_checkable
 class _Filterable(Protocol):
@@ -106,6 +111,65 @@ class FClip:
         except Exception:
             log_exception(f"FClip.from_image_audio(image={image_path}, audio={audio_path})")
             raise
+    
+    @classmethod
+    def from_clip(
+        cls,
+        clip: ClipSpec,
+        *,
+        cfg: RenderConfig,
+        loop: int = 1,
+        sar: int = 1,
+    ) -> "FClip":
+        """
+        Reduced-signature constructor.
+        Unpacks values from ClipSpec + RenderConfig.
+        DOES NOT change behavior.
+        """
+
+        # Preserve existing offset behavior
+        offset_y = clip.pan_steps[0].offset_y if clip.pan_steps else 0
+
+        return cls.from_image_audio(
+            image_path=clip.image_path,
+            audio_path=clip.audio_paths,
+            loop=loop,
+            fps=cfg.fps,
+            max_h=cfg.viewport_h,
+            max_w=cfg.viewport_w,
+            sar=sar,
+            pix_fmt=cfg.pix_fmt,
+            verbose=cfg.verbose,
+            capture_stderr=cfg.capture_stderr,
+            capture_stdout=cfg.capture_stdout,
+            offset_y=offset_y,
+            viewport_h=clip.viewport_h,
+            viewport_w=clip.viewport_w,
+            side_margin_px=cfg.side_margin_px,
+        )
+
+
+    @classmethod
+    def from_spec(cls, spec: ClipSpec) -> "FClip":
+        """
+        Typed constructor.
+        Converts ClipSpec → FClip without changing behavior.
+        """
+
+        # IMPORTANT:
+        # Existing code uses a *single* offset_y per clip segment.
+        # Even when multiple pan steps exist, only the first one
+        # effectively applies per rendered segment.
+        # We preserve that behavior exactly.
+        offset_y = spec.pan_steps[0].offset_y if spec.pan_steps else 0
+
+        return cls(
+            image_path=spec.image_path,
+            a_paths=spec.audio_paths,
+            offset_y=offset_y,
+            viewport_w=spec.viewport_w,
+            viewport_h=spec.viewport_h,
+        )
 
 
     def _need_video(self) -> _Filterable:
@@ -150,6 +214,51 @@ class Timeline:
                 return float(stream["duration"])
         raise RuntimeError(f"Could not determine duration of {path}")
 
+    def render_typed(
+        self,
+        timeline: TimelineSpec,
+        *,
+        out_path: str | Path,
+        cfg: RenderConfig,
+    ) -> Path:
+        """
+        Typed wrapper around render().
+        DOES NOT change behavior.
+        """
+
+        # Convert ClipSpec → FClip (1:1 mapping)
+        clips: list[FClip] = []
+
+        for clip in timeline.clips:
+            # We use ONLY the first pan step offset per clip segment,
+            # exactly like the existing implementation does.
+            # (No behavior change)
+            offset_y = clip.pan_steps[0].offset_y if clip.pan_steps else 0
+
+            fclip = FClip.from_spec(clip)
+            clips.append(fclip)
+
+        # Reuse existing Timeline logic unchanged
+        tmp_timeline = Timeline(clips)
+
+        return tmp_timeline.render(
+            out_path,
+            fps=cfg.fps,
+            vcodec=cfg.vcodec,
+            preset=cfg.preset,
+            tune=cfg.tune,
+            cq=cfg.cq,
+            pix_fmt=cfg.pix_fmt,
+            acodec=cfg.acodec,
+            audio_bitrate=cfg.audio_bitrate,
+            verbose=cfg.verbose,
+            capture_stdout=cfg.capture_stdout,
+            capture_stderr=cfg.capture_stderr,
+            side_margin_px=cfg.side_margin_px,
+            keep_segments=cfg.keep_segments,
+        )
+
+
     def render(
         self,
         out_path: str | Path,
@@ -167,7 +276,7 @@ class Timeline:
         capture_stderr: bool = False,   # show ffmpeg stderr by default for easier debugging
         capture_stdout: bool = False,
         show_progress: bool = False,
-        side_margin_px: int = None,
+        side_margin_px: int = 0,
         keep_segments: bool = False
     ) -> Path:
         """

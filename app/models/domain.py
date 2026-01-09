@@ -1,73 +1,46 @@
 from pydantic import BaseModel
-from typing import List, Tuple
 from pathlib import Path
-import json
+from typing import Literal, Any, Optional, List, Tuple
 
-Point = Tuple[int, int]
+# atomic camera intent
+class PanStep(BaseModel):
+    dlg_id: int
+    offset_y: int
 
+# ONE renderable unit
+class ClipSpec(BaseModel):
+    image_path: Path
+    audio_paths: list[Path]
 
-class BBox(BaseModel):
-    x1: int
-    y1: int
-    x2: int
-    y2: int
-    poly: List[Point]
-    matched_rec_text_index: int
-    matched_rec_text_index_orig: int
+    pan_steps: list[PanStep]
 
+    viewport_w: int
+    viewport_h: int
 
-class DialogueLine(BaseModel):
-    id: int
-    image_id: str
-    image_file_name: str
-    image_rel_path_from_root: str
-    speaker: str
-    gender: str
-    emotion: str
-    text: str
-    paddle_bbox: BBox
+# a sequence of clips
+class TimelineSpec(BaseModel):
+    clips: list[ClipSpec]
 
+# how ffmpeg should behave
+class RenderConfig(BaseModel):
+    fps: int = 24
 
-class PaddleOCRResult(BaseModel):
-    rec_texts: List[str]
-    rec_polys: List[List[Point]]
-    rec_boxes: List[List[int]]
+    viewport_w: int = 1080
+    viewport_h: int = 1920
+    side_margin_px: int = 0
+    first_dialog_margin_pct: float = 0.02
+    safe_margin: int = 0
 
+    vcodec: str = "h264_nvenc"
+    preset: str = "p5"
+    tune: str = "hq"
+    cq: int = 23
+    pix_fmt: str = "yuv420p"
 
-class LLMResult(BaseModel):
-    text: str
-    input_tokens: int
-    output_tokens: int
-    throughput: float
+    acodec: str = "aac"
+    audio_bitrate: str = "192k"
 
-
-class OCRImageResult(BaseModel):
-    image_file_name: str
-    image_rel_path_from_root: str
-    image_id: str
-    run_id: str
-    result: LLMResult
-    parsed_dialogue: List[DialogueLine]
-    image_width: int
-    image_height: int
-    paddleocr_result: PaddleOCRResult
-
-
-class OCRRun(BaseModel):
-    """
-    Represents ONE ocr_output_with_bboxes.json file + its parsed content.
-    """
-    json_path: Path
-    images: List[OCRImageResult]
-
-    @classmethod
-    def from_json_file(cls, path: Path) -> "OCRRun":
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, list):
-            raise ValueError(
-                f"OCR JSON must be a list, got {type(data)} in {path}"
-            )
-        return cls(
-            json_path=path,
-            images=[OCRImageResult.model_validate(x) for x in data],
-        )
+    verbose: bool = True
+    capture_stdout: bool = False
+    capture_stderr: bool = False
+    keep_segments: bool = False

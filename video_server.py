@@ -7,10 +7,9 @@ from pydantic import BaseModel
 from app.config import VideoConfig
 from app.video_runner import VideoRunner
 from app.chapter_video_builder import (
-    ChapterVideoBuilder,
-    build_dialogue_previews,
+    ChapterVideoBuilder
 )
-from app.models.domain import OCRRun, OCRImageResult
+from app.models.domain import OCRRun, OCRImageResult, RenderConfig
 from app.models.api import DialoguePreviewOut, ImagePreviewOut
 
 
@@ -47,7 +46,7 @@ def get_run_previews(run_id: str):
     This does NOT run ffmpeg or build video.
     """
 
-    run_dir = Path(config.output_root) / run_id
+    run_dir = Path(str(config.output_root)) / run_id
     json_files = list(run_dir.rglob("ocr_output_with_bboxes.json"))
 
     if not json_files:
@@ -60,20 +59,24 @@ def get_run_previews(run_id: str):
 
         for img in run.images:
             image_path = (
-                Path(config.input_root)
+                Path(str(config.input_root))
                 / img.image_rel_path_from_root
                 / img.image_file_name
             )
 
-            previews = build_dialogue_previews(
-                img,
-                image_path=image_path,
+            settings = RenderConfig(
                 viewport_w=builder.res_w,
                 viewport_h=builder.res_h,
                 safe_margin=builder.safe_margin,
                 first_dialog_margin_pct=getattr(
                     config, "first_dialog_margin_pct", 0.02
-                ),
+                )
+            )
+
+            previews = builder.build_dialogue_previews(
+                img,
+                image_path=image_path,
+                settings=settings
             )
 
             results.append(
@@ -81,16 +84,7 @@ def get_run_previews(run_id: str):
                     image_id=img.image_id,
                     image_file_name=img.image_file_name,
                     image_rel_path_from_root=img.image_rel_path_from_root,
-                    previews=[
-                        DialoguePreviewOut(
-                            dialogue_id=p.dialogue_id,
-                            dialogue_text=p.dialogue_text,
-                            pan_offset=p.pan_offset,
-                            crop_box=p.crop_box,
-                            bbox_y=p.bbox_y,
-                        )
-                        for p in previews
-                    ],
+                    previews=previews,
                 )
             )
 

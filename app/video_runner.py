@@ -20,7 +20,7 @@ class VideoRunner:
     def _build_clips(
         self,
         image_path: str | Path,
-        audio_files: list[str | Path],
+        audio_files: list[str] | list[Path],
         *,
         pan_plan: list[dict] | None = None,      # NEW
         loop: Optional[int] = None,
@@ -72,7 +72,7 @@ class VideoRunner:
     def run_single_img(
         self,
         image_path: str | Path,
-        audio_files: list[str | Path],
+        audio_files: list[str] | list[Path],
         run_id: str | None = None,
         out_filename: str = "final.mp4",
         *,

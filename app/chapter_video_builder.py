@@ -1,11 +1,12 @@
 from pathlib import Path
 import json, re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from app.video_runner import VideoRunner
 from app.config import VideoConfig
 from typing import Optional
 import subprocess, shlex
-from app.types import BBox, DialogueLine, PaddleOCRResult, LLMResult, OCRImageResult, OCRRun, DialoguePreview
+import app.models.domain as d
+import app.models.api as a
 
 class ChapterVideoBuilder:
     def __init__(self, config: VideoConfig, resolution=(1080,1920), safe_margin=200):
@@ -45,14 +46,14 @@ class ChapterVideoBuilder:
         for img in run.images:
             # ---- resolve image path ----
             image_path = (
-                Path(self.config.input_root)
+                Path(str(self.config.input_root))
                 / img.image_rel_path_from_root
                 / img.image_file_name
             )
 
             # ---- resolve dialogue audio paths ----
             image_audio_root = (
-                run.parent_dir
+                run.json_path.parent
                 / f"{Path(img.image_file_name).stem}_jpg"
             )
 
@@ -66,7 +67,6 @@ class ChapterVideoBuilder:
             collected.append((image_path, dialogue_audios))
 
         return collected
-
 
     def _make_pan_plan(self, img: OCRImageResult) -> List[Dict[str, Any]]:
         """
@@ -121,21 +121,21 @@ class ChapterVideoBuilder:
                       run: OCRRun, 
                       version: int,
                       *,
-                      out_dir: Path = None,
+                      out_dir: Optional[Path] = None,
                       side_margin_px: Optional[int] = None,
                       verbose: Optional[bool] = None,
                       capture_stderr: Optional[bool] = None,
                       capture_stdout: Optional[bool] = None,
-                      ) -> dict:
+                      ) -> list[dict]:
         """Build one chapter video from OCR JSON + audios."""
         # ---- collect image + dialogue audio paths (unchanged helpers) ----
         res = []
         img_and_audio = self._collect_paths(run)
-        base_out_dir = out_dir if out_dir else run.parent_dir / "video_output"
+        base_out_dir = out_dir if out_dir else run.json_path.parent / "video_output"
 
         for img, (image_path, audio_files) in zip(run.images, img_and_audio):
             if not audio_files:
-                raise FileNotFoundError(f"No dialogue audio files found for {run.filename}")
+                raise FileNotFoundError(f"No dialogue audio files found for {run.json_path.name}")
 
             # ---- make pan plan from bboxes ----
             pan_plan = self._make_pan_plan(img)
@@ -209,6 +209,93 @@ class ChapterVideoBuilder:
 
         return res
 
+    def build_chapter_from_previews(self, 
+                      run: OCRRun, 
+                      version: int,
+                      settings: RenderConfig,
+                      *,
+                      out_dir: Optional[Path] = None,
+                      ) -> list:
+        """Build one chapter video from OCR JSON + audios."""
+        # ---- collect image + dialogue audio paths (unchanged helpers) ----
+        res = []
+        img_and_audio = self._collect_paths(run)
+        base_out_dir = out_dir if out_dir else run.json_path.parent / "video_output"
+
+        for img, (image_path, audio_files) in zip(run.images, img_and_audio):
+            if not audio_files:
+                raise FileNotFoundError(f"No dialogue audio files found for {run.json_path.name}")
+
+            # ---- make pan plan from bboxes ----
+            imagePreview = self.build_dialogue_previews(
+                img,
+                settings,
+                image_path
+            )
+
+            # ---- optional pre/post-roll (silence) ----
+            pre_s = float(getattr(self.config, "pre_roll_seconds", 0) or 0)
+            post_s = float(getattr(self.config, "post_roll_seconds", 0) or 0)
+            # build container folder name, if img file name is img001.jpg, the folder name will be img001_jpg
+            p = Path(img.image_file_name)
+            container_folder_name = f"{p.stem}_{p.suffix.lstrip('.')}"
+            img_out_dir = base_out_dir / container_folder_name
+            img_out_dir.mkdir(parents=True, exist_ok=True)
+
+            def _make_silence(out_wav: Path, seconds: float, sr: int = 48000) -> Path:
+                import subprocess, shlex
+                out_wav.parent.mkdir(parents=True, exist_ok=True)
+                # overwrite (-y) to avoid making silence3, silence4, etc.
+                cmd = f'ffmpeg -y -f lavfi -i anullsrc=r={sr}:cl=stereo -t {seconds} "{out_wav}"'
+                subprocess.run(shlex.split(cmd), check=True)
+                return out_wav
+
+            if pre_s > 0:
+                pre_sil = img_out_dir / "silence_pre.wav"
+                _make_silence(pre_sil, pre_s)
+                audio_files = [pre_sil] + audio_files
+                pan_plan = [{"dlg_id": -1, "offset": 0}] + pan_plan  # keep the camera at the top for preroll
+
+            if post_s > 0:
+                post_sil = img_out_dir / "silence_post.wav"
+                _make_silence(post_sil, post_s)
+                audio_files = audio_files + [post_sil]
+                if pan_plan:
+                    pan_plan = pan_plan + [{"dlg_id": -2, "offset": pan_plan[-1]["offset"]}]
+                else:
+                    pan_plan = [{"dlg_id": -2, "offset": 0}]
+
+            # ---- logging so you can see exactly what’s being used ----
+            print("[AUDIO ORDER]")
+            for i, ap in enumerate(audio_files):
+                print(f"  {i:02d}: {Path(ap).name}")
+            print("[PAN OFFSETS]")
+            for i, pp in enumerate(pan_plan):
+                print(f"  {i:02d}: offset={pp['offset']} (dlg_id={pp['dlg_id']})")
+
+            # ---- versioned output filename in the same folder as the JSON ----
+            existing = list(img_out_dir.glob("v*.mp4"))
+            import re
+            ver = 1 + max([int(m.group(1)) for f in existing if (m := re.search(r"v(\d+)", f.name))] or [0])
+            out_file = img_out_dir / f"v{ver}.mp4"
+
+            # ---- run the render (pass output_dir so video lands next to JSON) ----
+            result = self.runner.run_single_img(
+                image_path=image_path,
+                audio_files=audio_files,
+                out_filename=out_file.name,
+                max_w=self.res_w,
+                max_h=self.res_h,
+                pan_plan=pan_plan,
+                output_dir=img_out_dir,
+                verbose=settings.verbose,
+                capture_stderr=settings.capture_stderr,
+                capture_stdout=settings.capture_stdout
+            )
+            res.append(result)
+
+        return res
+
     def build_run(
         self,
         run_id: str,
@@ -217,9 +304,9 @@ class ChapterVideoBuilder:
         verbose: Optional[bool] = None,
         capture_stderr: Optional[bool] = None,
         capture_stdout: Optional[bool] = None,
-    ) -> List[dict]:
+    ) -> List[List[dict]]:
         """Process all OCR runs under a run_id directory."""
-        run_dir = Path(self.config.output_root) / run_id
+        run_dir = Path(str(self.config.output_root)) / run_id
         json_files = list(run_dir.rglob("ocr_output_with_bboxes.json"))
 
         side_margin_px = (
@@ -228,12 +315,12 @@ class ChapterVideoBuilder:
             else (self.config.side_margin_px or 0)
         )
 
-        results: List[dict] = []
+        results: List[List[dict]] = []
 
         for json_path in json_files:
             run = OCRRun.from_json_file(json_path)
 
-            out_dir = run.parent_dir / "video_output"
+            out_dir = run.json_path.parent / "video_output"
             out_dir.mkdir(exist_ok=True)
 
             # determine next version
@@ -257,68 +344,65 @@ class ChapterVideoBuilder:
 
         return results
 
-def build_dialogue_previews(
-    img: OCRImageResult,
-    *,
-    image_path: Path,
-    viewport_w: int,
-    viewport_h: int,
-    safe_margin: int,
-    first_dialog_margin_pct: float = 0.02,
-) -> List[DialoguePreview]:
-    """
-    Compute preview frames for each dialogue in an image.
-    Pure function: no IO, no ffmpeg.
-    """
+    def build_dialogue_previews(
+        self,
+        img: d.PaddleOCRImage,
+        settings: d.RenderConfig,
+        image_path: Path
+    ) -> List[a.DialoguePreviewOut]:
+        """
+        Compute preview frames for each dialogue in an image.
+        Pure function: no IO, no ffmpeg.
+        """
 
-    raw_w = img.image_width
-    raw_h = img.image_height
+        raw_w = img.image_width
+        raw_h = img.image_height
 
-    # scale image to viewport width (same as video logic)
-    scale = viewport_w / raw_w
-    scaled_w = viewport_w
-    scaled_h = int(raw_h * scale)
+        # scale image to viewport width (same as video logic)
+        scale = settings.viewport_w / raw_w
+        scaled_w = settings.viewport_w
+        scaled_h = int(raw_h * scale)
 
-    max_offset = max(0, scaled_h - viewport_h)
+        max_offset = max(0, scaled_h - settings.viewport_h)
 
-    dialogs = [d for d in img.parsed_dialogue if d.paddle_bbox]
-    previews: List[DialoguePreview] = []
+        dialogs = [d for d in img.parsed_dialogue if d.paddle_bbox]
+        previews: List[DialoguePreviewOut] = []
 
-    cur_offset = 0
-    first_margin = int(viewport_h * first_dialog_margin_pct)
+        cur_offset = 0
+        first_margin = int(settings.viewport_h * settings.first_dialog_margin_pct)
 
-    for idx, dlg in enumerate(dialogs):
-        bbox_y = dlg.paddle_bbox.y1
-        y_scaled = int(bbox_y * scale)
+        for idx, dlg in enumerate(dialogs):
+            bbox_y = dlg.paddle_bbox.y1
+            y_scaled = int(bbox_y * scale)
 
-        if idx == 0:
-            offset = max(0, y_scaled - first_margin)
-        else:
-            offset = cur_offset if y_scaled < cur_offset else max(
-                0, y_scaled - safe_margin
+            if idx == 0:
+                offset = max(0, y_scaled - first_margin)
+            else:
+                offset = cur_offset if y_scaled < cur_offset else max(
+                    0, y_scaled - settings.safe_margin
+                )
+
+            offset = min(offset, max_offset)
+            cur_offset = offset
+
+            crop_box = (
+                0,
+                offset,
+                settings.viewport_w,
+                offset + settings.viewport_h,
             )
 
-        offset = min(offset, max_offset)
-        cur_offset = offset
-
-        crop_box = (
-            0,
-            offset,
-            viewport_w,
-            offset + viewport_h,
-        )
-
-        previews.append(
-            DialoguePreview(
-                dialogue_id=dlg.id,
-                dialogue_text=dlg.text,
-                image_path=image_path,
-                pan_offset=offset,
-                viewport_size=(viewport_w, viewport_h),
-                scaled_image_size=(scaled_w, scaled_h),
-                crop_box=crop_box,
-                bbox_y=bbox_y,
+            previews.append(
+                DialoguePreviewOut(
+                    dialogue_id=dlg.id,
+                    dialogue_text=dlg.text,
+                    image_path=str(image_path),
+                    pan_offset=offset,
+                    viewport_size=(settings.viewport_w, settings.viewport_h),
+                    scaled_image_size=(scaled_w, scaled_h),
+                    crop_box=crop_box,
+                    bbox_y=bbox_y,
+                )
             )
-        )
 
-    return previews
+        return previews
