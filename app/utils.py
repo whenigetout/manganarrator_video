@@ -3,7 +3,7 @@ import time
 from rich.console import Console
 import sys
 import threading
-
+import soundfile as sf
 import traceback
 
 def log_exception(context: str = "Unhandled exception", label: str = "💀"):
@@ -12,6 +12,10 @@ def log_exception(context: str = "Unhandled exception", label: str = "💀"):
 
 def ensure_folder(path: Path):
     path.mkdir(parents=True, exist_ok=True)
+
+def get_audio_duration(path: Path) -> float:
+    with sf.SoundFile(path) as f:
+        return len(f) / f.samplerate
 
 class Timer:
     last_duration = 0.0

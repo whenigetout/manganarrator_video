@@ -59,6 +59,8 @@ class Frame(BaseModel):
 
 class DialogueLine_preview(o.DialogueLine):
     preview_frame: Frame
+    audio_ref: o.MediaRef
+    duration: float
 
 class OCRImg_preview(o.OCRImage):
     frame_size: Size

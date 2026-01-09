@@ -9,6 +9,9 @@ import app.models.domain as d
 import app.models.api as a
 import mn_contracts.ocr as o
 import app.models.exceptions as ex
+import mn_contracts.pcc_backend as p
+import app.utils as utils
+from app.backends.ffmpeg_backend import FClip, Timeline
 
 class ChapterVideoBuilder:
     def __init__(self, config: VideoConfig, resolution=(1080,1920), safe_margin=200):
@@ -23,283 +26,11 @@ class ChapterVideoBuilder:
         subprocess.run(shlex.split(cmd), check=True)
         return out_wav
 
-    def _latest_audio(self, dlg_folder: Path) -> Path:
-        """Pick latest vN file by sorting filenames like v1__, v2__, ..."""
-        wavs = list(dlg_folder.glob("*.wav"))
-        if not wavs:
-            raise FileNotFoundError(f"No audio files in {dlg_folder}")
-        # sort by version number in filename
-        def vnum(p: Path):
-            m = re.match(r"v(\d+)", p.name)
-            return int(m.group(1)) if m else 0
-        return max(wavs, key=vnum)
-
-    def _collect_paths(
-        self,
-        run: o.OCRRun,
-    ) -> List[Tuple[Path, List[Path]]]:
-        """
-        For each image in the OCR run, return:
-        - absolute image path
-        - list of dialogue audio paths (one per dialogue, ordered)
-        """
-        collected: List[Tuple[Path, List[Path]]] = []
-
-        # for img in run.images:
-        #     # ---- resolve image path ----
-        #     image_path = (
-        #         Path(str(self.config.input_root))
-        #         / img.image_rel_path_from_root
-        #         / img.image_file_name
-        #     )
-
-        #     # ---- resolve dialogue audio paths ----
-        #     image_audio_root = (
-        #         run.json_path.parent
-        #         / f"{Path(img.image_file_name).stem}_jpg"
-        #     )
-
-        #     dialogue_audios: List[Path] = []
-
-        #     for dlg in img.parsed_dialogue:
-        #         dlg_dir = image_audio_root / f"dialogue__{dlg.id}"
-        #         audio_path = self._latest_audio(dlg_dir)
-        #         dialogue_audios.append(audio_path)
-
-        #     collected.append((image_path, dialogue_audios))
-
-        return collected
-
-    def build_chapter(self, 
-                      run: o.OCRRun, 
-                      version: int,
-                      *,
-                      out_dir: Optional[Path] = None,
-                      side_margin_px: Optional[int] = None,
-                      verbose: Optional[bool] = None,
-                      capture_stderr: Optional[bool] = None,
-                      capture_stdout: Optional[bool] = None,
-                      ) -> list[dict]:
-        """Build one chapter video from OCR JSON + audios."""
-        # ---- collect image + dialogue audio paths (unchanged helpers) ----
-        res = []
-        img_and_audio = self._collect_paths(run)
-        base_out_dir = out_dir if out_dir else run.ocr_json_file.parent / "video_output"
-
-        for img, (image_path, audio_files) in zip(run.images, img_and_audio):
-            if not audio_files:
-                raise FileNotFoundError(f"No dialogue audio files found for {run.json_path.name}")
-
-            # ---- make pan plan from bboxes ----
-            pan_plan = self._make_pan_plan(img)
-            if len(pan_plan) != len(audio_files):
-                print(f"[WARN] pan_plan({len(pan_plan)}) != audio_files({len(audio_files)}). "
-                    "Will align by min length.")
-                min_len = min(len(pan_plan), len(audio_files))
-                pan_plan = pan_plan[:min_len]
-                audio_files = audio_files[:min_len]
-
-            # ---- optional pre/post-roll (silence) ----
-            pre_s = float(getattr(self.config, "pre_roll_seconds", 0) or 0)
-            post_s = float(getattr(self.config, "post_roll_seconds", 0) or 0)
-            # build container folder name, if img file name is img001.jpg, the folder name will be img001_jpg
-            p = Path(img.image_file_name)
-            container_folder_name = f"{p.stem}_{p.suffix.lstrip('.')}"
-            img_out_dir = base_out_dir / container_folder_name
-            img_out_dir.mkdir(parents=True, exist_ok=True)
-
-            def _make_silence(out_wav: Path, seconds: float, sr: int = 48000) -> Path:
-                import subprocess, shlex
-                out_wav.parent.mkdir(parents=True, exist_ok=True)
-                # overwrite (-y) to avoid making silence3, silence4, etc.
-                cmd = f'ffmpeg -y -f lavfi -i anullsrc=r={sr}:cl=stereo -t {seconds} "{out_wav}"'
-                subprocess.run(shlex.split(cmd), check=True)
-                return out_wav
-
-            if pre_s > 0:
-                pre_sil = img_out_dir / "silence_pre.wav"
-                _make_silence(pre_sil, pre_s)
-                audio_files = [pre_sil] + audio_files
-                pan_plan = [{"dlg_id": -1, "offset": 0}] + pan_plan  # keep the camera at the top for preroll
-
-            if post_s > 0:
-                post_sil = img_out_dir / "silence_post.wav"
-                _make_silence(post_sil, post_s)
-                audio_files = audio_files + [post_sil]
-                if pan_plan:
-                    pan_plan = pan_plan + [{"dlg_id": -2, "offset": pan_plan[-1]["offset"]}]
-                else:
-                    pan_plan = [{"dlg_id": -2, "offset": 0}]
-
-            # ---- logging so you can see exactly what’s being used ----
-            print("[AUDIO ORDER]")
-            for i, ap in enumerate(audio_files):
-                print(f"  {i:02d}: {Path(ap).name}")
-            print("[PAN OFFSETS]")
-            for i, pp in enumerate(pan_plan):
-                print(f"  {i:02d}: offset={pp['offset']} (dlg_id={pp['dlg_id']})")
-
-            # ---- versioned output filename in the same folder as the JSON ----
-            existing = list(img_out_dir.glob("v*.mp4"))
-            import re
-            ver = 1 + max([int(m.group(1)) for f in existing if (m := re.search(r"v(\d+)", f.name))] or [0])
-            out_file = img_out_dir / f"v{ver}.mp4"
-
-            # ---- run the render (pass output_dir so video lands next to JSON) ----
-            result = self.runner.run_single_img(
-                image_path=image_path,
-                audio_files=audio_files,
-                out_filename=out_file.name,
-                max_w=self.res_w,
-                max_h=self.res_h,
-                pan_plan=pan_plan,
-                output_dir=img_out_dir,
-                verbose=verbose,
-                capture_stderr=capture_stderr,
-                capture_stdout=capture_stdout
-            )
-            res.append(result)
-
-        return res
-
-    def build_chapter_from_previews(self, 
-                      run: OCRRun, 
-                      version: int,
-                      settings: RenderConfig,
-                      *,
-                      out_dir: Optional[Path] = None,
-                      ) -> list:
-        """Build one chapter video from OCR JSON + audios."""
-        # ---- collect image + dialogue audio paths (unchanged helpers) ----
-        res = []
-        img_and_audio = self._collect_paths(run)
-        base_out_dir = out_dir if out_dir else run.json_path.parent / "video_output"
-
-        for img, (image_path, audio_files) in zip(run.images, img_and_audio):
-            if not audio_files:
-                raise FileNotFoundError(f"No dialogue audio files found for {run.json_path.name}")
-
-            # ---- make pan plan from bboxes ----
-            imagePreview = self.build_dialogue_previews(
-                img,
-                settings,
-                image_path
-            )
-
-            # ---- optional pre/post-roll (silence) ----
-            pre_s = float(getattr(self.config, "pre_roll_seconds", 0) or 0)
-            post_s = float(getattr(self.config, "post_roll_seconds", 0) or 0)
-            # build container folder name, if img file name is img001.jpg, the folder name will be img001_jpg
-            p = Path(img.image_file_name)
-            container_folder_name = f"{p.stem}_{p.suffix.lstrip('.')}"
-            img_out_dir = base_out_dir / container_folder_name
-            img_out_dir.mkdir(parents=True, exist_ok=True)
-
-            def _make_silence(out_wav: Path, seconds: float, sr: int = 48000) -> Path:
-                import subprocess, shlex
-                out_wav.parent.mkdir(parents=True, exist_ok=True)
-                # overwrite (-y) to avoid making silence3, silence4, etc.
-                cmd = f'ffmpeg -y -f lavfi -i anullsrc=r={sr}:cl=stereo -t {seconds} "{out_wav}"'
-                subprocess.run(shlex.split(cmd), check=True)
-                return out_wav
-
-            if pre_s > 0:
-                pre_sil = img_out_dir / "silence_pre.wav"
-                _make_silence(pre_sil, pre_s)
-                audio_files = [pre_sil] + audio_files
-                pan_plan = [{"dlg_id": -1, "offset": 0}] + pan_plan  # keep the camera at the top for preroll
-
-            if post_s > 0:
-                post_sil = img_out_dir / "silence_post.wav"
-                _make_silence(post_sil, post_s)
-                audio_files = audio_files + [post_sil]
-                if pan_plan:
-                    pan_plan = pan_plan + [{"dlg_id": -2, "offset": pan_plan[-1]["offset"]}]
-                else:
-                    pan_plan = [{"dlg_id": -2, "offset": 0}]
-
-            # ---- logging so you can see exactly what’s being used ----
-            print("[AUDIO ORDER]")
-            for i, ap in enumerate(audio_files):
-                print(f"  {i:02d}: {Path(ap).name}")
-            print("[PAN OFFSETS]")
-            for i, pp in enumerate(pan_plan):
-                print(f"  {i:02d}: offset={pp['offset']} (dlg_id={pp['dlg_id']})")
-
-            # ---- versioned output filename in the same folder as the JSON ----
-            existing = list(img_out_dir.glob("v*.mp4"))
-            import re
-            ver = 1 + max([int(m.group(1)) for f in existing if (m := re.search(r"v(\d+)", f.name))] or [0])
-            out_file = img_out_dir / f"v{ver}.mp4"
-
-            # ---- run the render (pass output_dir so video lands next to JSON) ----
-            result = self.runner.run_single_img(
-                image_path=image_path,
-                audio_files=audio_files,
-                out_filename=out_file.name,
-                max_w=self.res_w,
-                max_h=self.res_h,
-                pan_plan=pan_plan,
-                output_dir=img_out_dir,
-                verbose=settings.verbose,
-                capture_stderr=settings.capture_stderr,
-                capture_stdout=settings.capture_stdout
-            )
-            res.append(result)
-
-        return res
-
-    def build_run(
-        self,
-        run_id: str,
-        *,
-        side_margin_px: Optional[int] = None,
-        verbose: Optional[bool] = None,
-        capture_stderr: Optional[bool] = None,
-        capture_stdout: Optional[bool] = None,
-    ) -> List[List[dict]]:
-        """Process all OCR runs under a run_id directory."""
-        run_dir = Path(str(self.config.output_root)) / run_id
-        json_files = list(run_dir.rglob("ocr_output_with_bboxes.json"))
-
-        side_margin_px = (
-            side_margin_px
-            if side_margin_px is not None
-            else (self.config.side_margin_px or 0)
-        )
-
-        results: List[List[dict]] = []
-
-        for json_path in json_files:
-            run = OCRRun.from_json_file(json_path)
-
-            out_dir = run.json_path.parent / "video_output"
-            out_dir.mkdir(exist_ok=True)
-
-            # determine next version
-            existing = list(out_dir.glob("v*.mp4"))
-            version = 1 + max(
-                (int(m.group(1)) for f in existing if (m := re.search(r"v(\d+)", f.name))),
-                default=0,
-            )
-
-            results.append(
-                self.build_chapter(
-                    run,
-                    version,
-                    out_dir=out_dir,
-                    side_margin_px=side_margin_px,
-                    verbose=verbose,
-                    capture_stderr=capture_stderr,
-                    capture_stdout=capture_stdout,
-                )
-            )
-
-        return results
-
     def build_dialogue_line_preview(
             self,
             dlg: o.DialogueLine,
+            run_id: str,
+            img_ref: o.MediaRef,
             img_size: d.Size,
             frame_size: d.Size,
             img_scale: float,
@@ -332,6 +63,18 @@ class ChapterVideoBuilder:
                 y2 = img_size.h * img_scale
                 y1 = y2 - frame_size.h
 
+            # latest audio ref
+            latest_audio_ref = p.latest_tts_audio_ref(
+                run_id=run_id,
+                dlg_id=dlg.id,
+                img_ref=img_ref,
+                media_root=self.config.media_root
+            )
+
+            # audio duration
+            audio_path = latest_audio_ref.resolve(media_root=Path(self.config.media_root))
+            latest_audio_duration = utils.get_audio_duration(path=audio_path)
+
             preview = d.DialogueLine_preview(
                 **dlg.model_dump(),
                 preview_frame=d.Frame(
@@ -340,6 +83,8 @@ class ChapterVideoBuilder:
                     x2=frame_size.w,
                     y2=int(y2),
                 ),
+                audio_ref=latest_audio_ref,
+                duration=latest_audio_duration
             )
 
             return preview
@@ -348,6 +93,7 @@ class ChapterVideoBuilder:
 
     def build_ocrimg_preview(
         self,
+        run_id: str,
         img: o.OCRImage,
         settings: d.RenderConfig,
     ) -> d.OCRImg_preview:
@@ -376,6 +122,8 @@ class ChapterVideoBuilder:
             for dlg in img.dialogue_lines:
                 prev_preview = self.build_dialogue_line_preview(
                     dlg=dlg,
+                    run_id=run_id,
+                    img_ref=img.image_info.image_ref,
                     img_size=img_size,
                     frame_size=frame_size,
                     img_scale=img_scale,
@@ -397,3 +145,109 @@ class ChapterVideoBuilder:
             return result
         except:
             raise ex.PreviewError
+        
+    def build_ocrrun_preview(
+        self,
+        ocrrun: o.OCRRun,
+        settings: d.RenderConfig,
+    ) -> d.OCRRun_preview:
+        """
+        Compute preview frames for each dialogue in an image.
+        Pure function: no IO, no ffmpeg.
+        """
+        try:
+            img_previews: List[d.OCRImg_preview] = []
+
+            for img in ocrrun.images:
+                preview = self.build_ocrimg_preview(
+                    run_id=ocrrun.run_id,
+                    img=img,
+                    settings=settings
+                )
+                img_previews.append(preview)
+
+            result = d.OCRRun_preview(
+                **ocrrun.model_dump(),
+                images=img_previews
+            )
+            return result
+        except:
+            raise ex.PreviewError
+
+    def build_dialogueline_video(
+        self,
+        dlg: d.DialogueLine_preview,
+        *,
+        img_path: Path,
+        frame_size: d.Size,
+    ) -> d.ClipSpec:
+        """
+        Lowest-level materialization:
+        DialogueLine_preview → ClipSpec
+        """
+
+        return d.ClipSpec(
+            image_path=img_path,
+            audio_paths=[
+                dlg.audio_ref.resolve(media_root=Path(self.config.media_root))
+            ],
+            pan_steps=[
+                d.PanStep(
+                    dlg_id=dlg.id,
+                    offset_y=dlg.preview_frame.y1
+                )
+            ],
+            viewport_w=frame_size.w,
+            viewport_h=frame_size.h,
+        )
+
+    def build_ocrimg_video(
+        self,
+        img_preview: d.OCRImg_preview,
+    ) -> d.TimelineSpec:
+        """
+        OCRImg_preview → TimelineSpec
+        (concatenation of DialogueLine clips)
+        """
+
+        img_path = img_preview.image_info.image_ref.resolve(
+            media_root=Path(self.config.media_root)
+        )
+
+        clips: list[d.ClipSpec] = []
+
+        for dlg in img_preview.dialogue_lines:
+            clip = self.build_dialogueline_video(
+                dlg,
+                img_path=img_path,
+                frame_size=img_preview.frame_size,
+            )
+            clips.append(clip)
+
+        return d.TimelineSpec(clips=clips)
+
+    def build_ocrrun_video(
+        self,
+        ocrrun_preview: d.OCRRun_preview,
+        *,
+        out_path: Path,
+    ) -> Path:
+        """
+        OCRRun_preview → final rendered video
+        """
+
+        all_clips: list[d.ClipSpec] = []
+
+        for img_preview in ocrrun_preview.images:
+            img_timeline = self.build_ocrimg_video(img_preview)
+            all_clips.extend(img_timeline.clips)
+
+        timeline_spec = d.TimelineSpec(clips=all_clips)
+
+        runner = Timeline(clips=)
+
+        return timeline.ren(
+            timeline,
+            out_path=out_path,
+            cfg=self.config,
+        )
