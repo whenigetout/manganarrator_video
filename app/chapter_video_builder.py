@@ -11,7 +11,7 @@ import app.models.exceptions as ex
 import mn_contracts.pcc_backend as p
 import app.utils as utils
 from app.backends.ffmpeg_backend.clip import FClip
-from app.backends.ffmpeg_backend.concat import concat_clips
+from app.backends.ffmpeg_backend.concat import concat_clips, concat_files
 
 class ChapterVideoBuilder:
     def __init__(self, config: VideoConfig, resolution=(1080,1920), safe_margin=200):
@@ -183,63 +183,93 @@ class ChapterVideoBuilder:
         *,
         img_path: Path,
         frame_size: d.Size,
-    ) -> FClip:
+        settings: d.RenderConfig,
+        out_path: Path,
+    ) -> Path:
         """
-        Lowest-level materialization:
-        DialogueLine_preview → FClip
+        Render ONE dialogue line to ONE mp4 (hard FFmpeg boundary).
+        This is NVENC-safe and memory-bounded.
         """
 
-        duration = dlg.duration
         audio_path = dlg.audio_ref.resolve(
             media_root=Path(self.config.media_root)
         )
 
-        # 1. Still image 
-        clip = FClip.image(
-            img_path,
-        )
-
-        # Scale image to viewport width
-        clip = clip.scale(w=frame_size.w, h=frame_size.h)
-
-        # 2. Crop to preview frame (vertical pan)
         pf = dlg.preview_frame
-        clip = clip.crop(
-            w=frame_size.w,
-            h=frame_size.h,
-            x=0,
-            y=pf.y1,
+
+        clip = (
+            FClip.image(img_path)
+            .scale(w=frame_size.w)
+            .crop(
+                w=frame_size.w,
+                h=frame_size.h,
+                x=0,
+                y=pf.y1,
+            )
+            .with_audio(audio_path)
         )
 
-        # 3. Attach audio
-        clip = clip.with_audio(audio_path)
+        # 🔴 CRITICAL FIX: reset audio PTS to start at 0
+        if not clip.a:
+            raise
+        clip.a = clip.a.filter("asetpts", "PTS-STARTPTS")
 
-        return clip
+        clip.output(
+            out_path,
+            vcodec=settings.vcodec,
+            pix_fmt=settings.pix_fmt,
+            acodec=settings.acodec,
+            audio_bitrate=settings.audio_bitrate,
+            verbose=settings.verbose,
+            overwrite=True,
+        )
+
+        return out_path
 
     def build_ocrimg_video(
         self,
         img_preview: d.OCRImg_preview,
-    ) -> list[FClip]:
+        *,
+        tmp_dir: Path,
+        img_index: int,
+        settings: d.RenderConfig,
+    ) -> Path:
         """
-        OCRImg_preview → list of FClips
-        (one per dialogue line)
+        OCRImg_preview → ONE image-level mp4
+        Internally renders ONE mp4 per dialogue (safe),
+        then concats them cheaply.
         """
 
         img_path = img_preview.image_info.image_ref.resolve(
             media_root=Path(self.config.media_root)
         )
 
-        clips: list[FClip] = []
+        dialogue_mp4s: list[Path] = []
 
-        for dlg in img_preview.dialogue_lines:
-            fc = self.build_dialogueline_video(
+        for j, dlg in enumerate(img_preview.dialogue_lines):
+            dlg_out = tmp_dir / f"img_{img_index:03d}_dlg_{j:02d}.mp4"
+
+            self.build_dialogueline_video(
                 dlg,
                 img_path=img_path,
                 frame_size=img_preview.frame_size,
+                settings=settings,
+                out_path=dlg_out,
             )
-            clips.append(fc)
 
-        return clips
+            dialogue_mp4s.append(dlg_out)
+
+        # Cheap concat (NO re-encode)
+        img_out = tmp_dir / f"img_{img_index:03d}.mp4"
+
+        concat_files(
+            dialogue_mp4s,
+            img_out,
+            overwrite=True,
+            verbose=settings.verbose,
+        )
+
+        return img_out
 
     def build_ocrrun_video(
         self,
@@ -248,32 +278,33 @@ class ChapterVideoBuilder:
         out_path: Path,
         settings: d.RenderConfig,
     ) -> Path:
-        """
-        OCRRun_preview → final rendered video
-        """
 
         ocrrun_preview = self.build_ocrrun_preview(
             ocrrun=ocrrun,
             settings=settings
         )
-        all_clips: list[FClip] = []
 
-        for img_preview in ocrrun_preview.images:
-            img_clips = self.build_ocrimg_video(img_preview)
-            all_clips.extend(img_clips)
+        tmp_dir = out_path.parent / "_tmp_imgs"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        if not all_clips:
-            raise RuntimeError("No dialogue clips generated for OCR run")
+        image_mp4s: list[Path] = []
 
-        final = concat_clips(all_clips)
+        for i, img_preview in enumerate(ocrrun_preview.images):
+            img_mp4 = self.build_ocrimg_video(
+                img_preview,
+                tmp_dir=tmp_dir,
+                img_index=i,
+                settings=settings,
+            )
+            image_mp4s.append(img_mp4)
 
-        final.output(
+        # Final concat (NO filters, NO re-encode)
+        concat_files(
+            image_mp4s,
             out_path,
-            vcodec=settings.vcodec,
-            pix_fmt=settings.pix_fmt,
-            acodec=settings.acodec,
-            audio_bitrate=settings.audio_bitrate,
+            overwrite=True,
             verbose=settings.verbose,
         )
+
 
         return out_path

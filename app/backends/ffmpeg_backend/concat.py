@@ -4,6 +4,7 @@ from typing import Iterable
 import ffmpeg
 
 from app.backends.ffmpeg_backend.clip import FClip
+from pathlib import Path
 
 
 def concat_clips(clips: Iterable[FClip]) -> FClip:
@@ -51,3 +52,34 @@ def concat_clips(clips: Iterable[FClip]) -> FClip:
     )
 
     return FClip(v=v_out, a=a_out, fps=fps)
+
+def concat_files(
+    paths: list[Path],
+    out_path: Path,
+    overwrite: bool = True,
+    verbose: bool = False,
+):
+    """
+    Concatenate already-encoded media files using FFmpeg concat demuxer.
+    This allows stream copy (-c copy).
+    """
+    list_file = out_path.with_suffix(".txt")
+
+    with open(list_file, "w", encoding="utf-8") as f:
+        for p in paths:
+            f.write(f"file '{p.resolve().as_posix()}'\n")
+
+    stream = (
+        ffmpeg
+        .input(str(list_file), format="concat", safe=0)
+        .output(
+            str(out_path),
+            vcodec="copy",
+            acodec="copy",
+        )
+    )
+
+    if overwrite:
+        stream = stream.overwrite_output()
+
+    stream.run(quiet=not verbose)

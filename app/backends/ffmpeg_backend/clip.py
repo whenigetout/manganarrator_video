@@ -50,6 +50,19 @@ class FClip:
     def audio(path: str | Path) -> "FClip":
         a = ffmpeg.input(str(path))
         return FClip(a=a)
+    
+    @staticmethod
+    def from_file(path: Path) -> "FClip":
+        """
+        Create an FClip from an already-encoded media file
+        (keeps both video and audio streams).
+        """
+        inp = ffmpeg.input(str(path))
+        return FClip(
+            v=inp.video,
+            a=inp.audio,
+            # DO NOT pass fps here
+        )
 
     @staticmethod
     def empty(*, fps: int = 24) -> "FClip":
@@ -304,7 +317,19 @@ class FClip:
             })
 
         if self.v and self.a:
-            stream = ffmpeg.output(self.v, self.a, str(path), **kwargs)
+            # Inject shortest into kwargs, NOT as a positional arg
+            kwargs = dict(kwargs)
+            kwargs["shortest"] = None # ✅ FLAG, no value
+
+            print("=====================OUTPUT CALLED WITH:", path, kwargs)
+
+
+            stream = ffmpeg.output(
+                self.v,
+                self.a,
+                str(path),
+                **kwargs
+            )
         elif self.v:
             stream = ffmpeg.output(self.v, str(path), **kwargs)
         else:
