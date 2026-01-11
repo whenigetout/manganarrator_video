@@ -3,3 +3,6 @@ class PreviewError(Exception):
 
 class InvalidInputError(Exception):
     pass
+
+class UnknownDuration(Exception):
+    pass

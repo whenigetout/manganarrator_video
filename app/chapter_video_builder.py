@@ -1,7 +1,6 @@
 from pathlib import Path
 import json, re
 from typing import List, Dict, Any, Tuple, Optional
-from app.video_runner import VideoRunner
 from app.config import VideoConfig
 from typing import Optional
 import subprocess, shlex
@@ -11,11 +10,11 @@ import mn_contracts.ocr as o
 import app.models.exceptions as ex
 import mn_contracts.pcc_backend as p
 import app.utils as utils
-from app.backends.ffmpeg_backend import FClip, Timeline
+from app.backends.ffmpeg_backend.clip import FClip
+from app.backends.ffmpeg_backend.concat import concat_clips
 
 class ChapterVideoBuilder:
     def __init__(self, config: VideoConfig, resolution=(1080,1920), safe_margin=200):
-        self.runner = VideoRunner(config)
         self.res_w, self.res_h = resolution
         self.safe_margin = safe_margin
         self.config = config
@@ -133,13 +132,15 @@ class ChapterVideoBuilder:
 
                 dlg_previews.append(prev_preview)
 
+            base = img.model_dump(exclude={"dialogue_lines"})
+
             result = d.OCRImg_preview(
-                **img.model_dump(),
+                **base,
                 frame_size=frame_size,
                 side_margin_px=settings.side_margin_px,
                 frame_padding_top=settings.first_dialog_top_padding,
                 img_scale=img_scale,
-                dialogue_lines=dlg_previews
+                dialogue_lines=dlg_previews,
             )
 
             return result
@@ -166,8 +167,10 @@ class ChapterVideoBuilder:
                 )
                 img_previews.append(preview)
 
+            base = ocrrun.model_dump(exclude={"images"})
+
             result = d.OCRRun_preview(
-                **ocrrun.model_dump(),
+                **base,
                 images=img_previews
             )
             return result
@@ -180,74 +183,97 @@ class ChapterVideoBuilder:
         *,
         img_path: Path,
         frame_size: d.Size,
-    ) -> d.ClipSpec:
+    ) -> FClip:
         """
         Lowest-level materialization:
-        DialogueLine_preview → ClipSpec
+        DialogueLine_preview → FClip
         """
 
-        return d.ClipSpec(
-            image_path=img_path,
-            audio_paths=[
-                dlg.audio_ref.resolve(media_root=Path(self.config.media_root))
-            ],
-            pan_steps=[
-                d.PanStep(
-                    dlg_id=dlg.id,
-                    offset_y=dlg.preview_frame.y1
-                )
-            ],
-            viewport_w=frame_size.w,
-            viewport_h=frame_size.h,
+        duration = dlg.duration
+        audio_path = dlg.audio_ref.resolve(
+            media_root=Path(self.config.media_root)
         )
+
+        # 1. Still image 
+        clip = FClip.image(
+            img_path,
+        )
+
+        # Scale image to viewport width
+        clip = clip.scale(w=frame_size.w, h=frame_size.h)
+
+        # 2. Crop to preview frame (vertical pan)
+        pf = dlg.preview_frame
+        clip = clip.crop(
+            w=frame_size.w,
+            h=frame_size.h,
+            x=0,
+            y=pf.y1,
+        )
+
+        # 3. Attach audio
+        clip = clip.with_audio(audio_path)
+
+        return clip
 
     def build_ocrimg_video(
         self,
         img_preview: d.OCRImg_preview,
-    ) -> d.TimelineSpec:
+    ) -> list[FClip]:
         """
-        OCRImg_preview → TimelineSpec
-        (concatenation of DialogueLine clips)
+        OCRImg_preview → list of FClips
+        (one per dialogue line)
         """
 
         img_path = img_preview.image_info.image_ref.resolve(
             media_root=Path(self.config.media_root)
         )
 
-        clips: list[d.ClipSpec] = []
+        clips: list[FClip] = []
 
         for dlg in img_preview.dialogue_lines:
-            clip = self.build_dialogueline_video(
+            fc = self.build_dialogueline_video(
                 dlg,
                 img_path=img_path,
                 frame_size=img_preview.frame_size,
             )
-            clips.append(clip)
+            clips.append(fc)
 
-        return d.TimelineSpec(clips=clips)
+        return clips
 
     def build_ocrrun_video(
         self,
-        ocrrun_preview: d.OCRRun_preview,
+        ocrrun: o.OCRRun,
         *,
         out_path: Path,
+        settings: d.RenderConfig,
     ) -> Path:
         """
         OCRRun_preview → final rendered video
         """
 
-        all_clips: list[d.ClipSpec] = []
+        ocrrun_preview = self.build_ocrrun_preview(
+            ocrrun=ocrrun,
+            settings=settings
+        )
+        all_clips: list[FClip] = []
 
         for img_preview in ocrrun_preview.images:
-            img_timeline = self.build_ocrimg_video(img_preview)
-            all_clips.extend(img_timeline.clips)
+            img_clips = self.build_ocrimg_video(img_preview)
+            all_clips.extend(img_clips)
 
-        timeline_spec = d.TimelineSpec(clips=all_clips)
+        if not all_clips:
+            raise RuntimeError("No dialogue clips generated for OCR run")
 
-        runner = Timeline(clips=)
+        final = concat_clips(all_clips)
 
-        return timeline.ren(
-            timeline,
-            out_path=out_path,
-            cfg=self.config,
+        final.output(
+            out_path,
+            vcodec=settings.vcodec,
+            pix_fmt=settings.pix_fmt,
+            acodec=settings.acodec,
+            audio_bitrate=settings.audio_bitrate,
+            verbose=settings.verbose,
         )
+
+        return out_path

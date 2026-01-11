@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable, Optional
+import app.utils as utils
 
 import ffmpeg
 
@@ -54,6 +55,46 @@ class FClip:
     def empty(*, fps: int = 24) -> "FClip":
         """Useful as a base for synthetic clips later (text, color, etc)."""
         return FClip(fps=fps)
+    
+    @staticmethod
+    def silence(duration: float, *, sample_rate: int = 44100) -> "FClip":
+        a = ffmpeg.input(
+            f"anullsrc=sample_rate={sample_rate}",
+            format="lavfi",
+            t=duration,
+        )
+        return FClip(a=a)
+
+
+    @staticmethod
+    def still(
+        path: str | Path,
+        *,
+        duration: float,
+        fps: int = 24,
+    ) -> "FClip":
+        v = ffmpeg.input(
+            str(path),
+            loop=1,
+            framerate=fps,
+            t=duration,
+        )
+        return FClip(v=v, fps=fps)
+
+    @staticmethod
+    def color(
+        color: str,
+        *,
+        width: int,
+        height: int,
+        duration: float,
+        fps: int = 24,
+    ) -> "FClip":
+        v = ffmpeg.input(
+            f"color={color}:s={width}x{height}:d={duration}:r={fps}",
+            format="lavfi",
+        )
+        return FClip(v=v, fps=fps)
 
     # ----------------------------
     # Guards
@@ -68,6 +109,43 @@ class FClip:
         if self.a is None:
             raise RuntimeError("This operation requires an audio stream.")
         return self.a
+    
+    # ----------------------------
+    # Fill in audio or video 
+    # ----------------------------
+
+    def ensure_audio_track(
+        self,
+        *,
+        duration: float,
+        sample_rate: int = 44100,
+    ) -> "FClip":
+        if self.a is None:
+            self.a = FClip.silence(
+                duration=duration,
+                sample_rate=sample_rate,
+            ).a
+        return self
+
+
+    def ensure_video_track(
+        self,
+        *,
+        duration: float,
+        width: int,
+        height: int,
+    ) -> "FClip":
+        if self.v is None:
+            self.v = FClip.color(
+                "black",
+                width=width,
+                height=height,
+                duration=duration,
+                fps=self.fps,
+            ).v
+        return self
+
+
 
     # ----------------------------
     # Audio attachment
@@ -202,7 +280,7 @@ class FClip:
         verbose: bool = True,
     ) -> None:
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        utils.ensure_folder(path=path.parent)
 
         if not self.v and not self.a:
             raise RuntimeError("Cannot output an empty clip.")
@@ -217,18 +295,24 @@ class FClip:
             })
 
         if self.a:
+            # normalize audio for AAC
+            self.a = self.a.filter("aresample", 44100)
+
             kwargs.update({
                 "acodec": acodec,
                 "audio_bitrate": audio_bitrate,
             })
 
-        stream = ffmpeg.output(
-            *(s for s in (self.v, self.a) if s),
-            str(path),
-            **kwargs,
-        )
+        if self.v and self.a:
+            stream = ffmpeg.output(self.v, self.a, str(path), **kwargs)
+        elif self.v:
+            stream = ffmpeg.output(self.v, str(path), **kwargs)
+        else:
+            stream = ffmpeg.output(self.a, str(path), **kwargs)
+
 
         if overwrite:
             stream = stream.overwrite_output()
 
         stream.run(quiet=not verbose)
+

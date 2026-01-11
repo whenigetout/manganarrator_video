@@ -1,6 +1,6 @@
-from clip import FClip
+from app.backends.ffmpeg_backend.clip import FClip
 from typing import List, Optional, Callable
-from concat import concat_clips
+from app.backends.ffmpeg_backend.concat import concat_clips
 
 class Timeline:
     """
