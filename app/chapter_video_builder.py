@@ -12,6 +12,7 @@ import mn_contracts.pcc_backend as p
 import app.utils as utils
 from app.backends.ffmpeg_backend.clip import FClip
 from app.backends.ffmpeg_backend.concat import concat_clips, concat_files
+import math
 
 class ChapterVideoBuilder:
     def __init__(self, config: VideoConfig, resolution=(1080,1920), safe_margin=200):
@@ -247,7 +248,7 @@ class ChapterVideoBuilder:
         dialogue_mp4s: list[Path] = []
 
         for j, dlg in enumerate(img_preview.dialogue_lines):
-            dlg_out = tmp_dir / f"img_{img_index:03d}_dlg_{j:02d}.mp4"
+            dlg_out = tmp_dir / f"img_{img_preview.image_id}_dlg_{dlg.id}.mp4"
 
             self.build_dialogueline_video(
                 dlg,
@@ -260,7 +261,7 @@ class ChapterVideoBuilder:
             dialogue_mp4s.append(dlg_out)
 
         # Cheap concat (NO re-encode)
-        img_out = tmp_dir / f"img_{img_index:03d}.mp4"
+        img_out = tmp_dir / f"img_{img_preview.image_id}.mp4"
 
         concat_files(
             dialogue_mp4s,
@@ -275,36 +276,141 @@ class ChapterVideoBuilder:
         self,
         ocrrun: o.OCRRun,
         *,
-        out_path: Path,
-        settings: d.RenderConfig,
-    ) -> Path:
-
-        ocrrun_preview = self.build_ocrrun_preview(
-            ocrrun=ocrrun,
-            settings=settings
-        )
-
-        tmp_dir = out_path.parent / "_tmp_imgs"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        image_mp4s: list[Path] = []
-
-        for i, img_preview in enumerate(ocrrun_preview.images):
-            img_mp4 = self.build_ocrimg_video(
-                img_preview,
-                tmp_dir=tmp_dir,
-                img_index=i,
-                settings=settings,
+        settings: d.RenderConfig
+    ) -> o.MediaRef:
+        try:
+            ocrrun_preview = self.build_ocrrun_preview(
+                ocrrun=ocrrun,
+                settings=settings
             )
-            image_mp4s.append(img_mp4)
 
-        # Final concat (NO filters, NO re-encode)
-        concat_files(
-            image_mp4s,
-            out_path,
-            overwrite=True,
-            verbose=settings.verbose,
-        )
+            ocr_json_path = ocrrun.ocr_json_file.resolve(Path(self.config.media_root))
+            out_dir = ocr_json_path.parent
 
+            tmp_dir = out_dir.parent / "_tmp_imgs"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        return out_path
+            image_mp4s: list[Path] = []
+
+            for i, img_preview in enumerate(ocrrun_preview.images):
+                img_mp4 = self.build_ocrimg_video(
+                    img_preview,
+                    tmp_dir=tmp_dir,
+                    img_index=i,
+                    settings=settings,
+                )
+                image_mp4s.append(img_mp4)
+
+            # Final concat (NO filters, NO re-encode)
+            out_path = out_dir / "narrated_video.mp4"
+            concat_files(
+                image_mp4s,
+                out_path,
+                overwrite=True,
+                verbose=settings.verbose,
+            )
+
+            video_ref = o.MediaRef(
+                namespace=o.MediaNamespace.OUTPUTS,
+                path=(out_path.relative_to(Path(self.config.media_root) / o.MediaNamespace.OUTPUTS.value)).as_posix()
+            )
+            return video_ref
+        except:
+            raise ex.BuildVideoError(f"Failed to build video for runid: {ocrrun.run_id}")
+
+    def build_img_segment_preview(
+            self,
+            img: o.OCRImage,
+            run_id: str
+    ):
+        try:
+            # split img into segments
+            pass
+        except:
+            raise ex.BuildVideoError
+
+    def build_segment_previews(
+            self,
+            input: d.BuildSegmentPreviewInput
+    ) -> List[d.ImageSegmentPreview]:
+        try:
+            ocrrun, render_config = input.ocr_run, input.render_config
+            segment_previews: List[d.ImageSegmentPreview] = []
+            for img in ocrrun.images:
+                # img_segment_previews = build_img_segment_preview()
+                def build_img_segment_preview():
+                    # split img into segments
+                    def segments_from_img():
+                        img_info = img.image_info
+                        viewport_w, viewport_h = render_config.viewport_w - 2 * render_config.side_margin_px, render_config.viewport_h
+                        scale = viewport_w / img_info.image_width
+                        img_h_scaled = img_info.image_height * scale
+                        total_segment_count = math.ceil(img_h_scaled // viewport_h)
+                        segments: List[d.Segment] = []
+                        start_y1 = 0
+                        for idx in range(1, total_segment_count + 1):
+                            start_y2 = start_y1 + viewport_h
+                            def assign_dialogues():
+                                all_dlgs = img.dialogue_lines
+                                assigned_dlgs = []
+                                for dlg in all_dlgs:
+                                    def should_dlg_be_in_segment() -> bool:
+                                        bbox = dlg.original_bbox
+                                        bbox_y1_scaled, bbox_y2_scaled = bbox.y1 * scale, bbox.y2 * scale
+
+                                        # very rare, almost imppractical edge case:
+                                        if bbox_y2_scaled - bbox_y1_scaled > (viewport_h -render_config.first_dialog_top_padding -render_config.last_dialog_bottom_padding):
+                                            raise ex.BuildVideoError("The impractical edge case happened, the bbox/speech bubble is LARGER than the viewport size")
+                                        
+                                        # bbox completely inside segment
+                                        def is_bbox_completely_inside_segment():
+                                            top_ok = bbox_y1_scaled >= start_y1 + render_config.first_dialog_top_padding
+                                            bottom_ok = bbox_y2_scaled <= start_y2 - render_config.last_dialog_bottom_padding
+
+                                            return top_ok and bottom_ok
+                                        if is_bbox_completely_inside_segment():
+                                            return True
+
+                                        # it's either split at the top edge or the bottom edge
+                                        def is_bbox_split_at_top():
+                                            top_ok = bbox_y1_scaled >= start_y1 + render_config.first_dialog_top_padding
+                                            bottom_ok = bbox_y2_scaled <= start_y2 - render_config.last_dialog_bottom_padding
+                                            return not top_ok and bottom_ok
+                                        
+                                        def is_bbox_split_at_bottom():
+                                            top_ok = bbox_y1_scaled >= start_y1 + render_config.first_dialog_top_padding
+                                            bottom_ok = bbox_y2_scaled <= start_y2 - render_config.last_dialog_bottom_padding
+                                            return top_ok and not bottom_ok
+                                        
+                                        if is_bbox_split_at_top():
+                                            # if at least half of it is inside the segment, assign it
+                                            # can ignore top/bottom padding for this decision
+                                            if bbox_y2_scaled - start_y1 >= (bbox_y2_scaled - bbox_y1_scaled) / 2:
+                                                return True
+
+                                        if is_bbox_split_at_bottom():
+                                            # if at least half of it is inside the segment, assign it
+                                            # can ignore top/bottom padding for this decision
+                                            if start_y2 - bbox_y1_scaled >= (bbox_y2_scaled - bbox_y1_scaled) / 2:
+                                                return True
+                                            
+                                        return False
+
+                                    if should_dlg_be_in_segment():
+                                        assigned_dlgs.append(dlg.id)
+
+                            start_y1 += viewport_h
+
+                # segment_previews.append(*img_segment_previews)
+            return segment_previews
+        except:
+            raise ex.BuildVideoError
+
+    def build_video_from_ocrrun(
+            self,
+            input: d.BuildVideoInput
+    ):
+        try:
+            pass
+        except:
+            raise ex.BuildVideoError

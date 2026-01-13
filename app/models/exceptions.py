@@ -6,3 +6,6 @@ class InvalidInputError(Exception):
 
 class UnknownDuration(Exception):
     pass
+
+class BuildVideoError(Exception):
+    pass
