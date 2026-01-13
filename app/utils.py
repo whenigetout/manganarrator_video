@@ -5,6 +5,9 @@ import sys
 import threading
 import soundfile as sf
 import traceback
+import mn_contracts.ocr as o
+import app.models.domain as d
+import mn_contracts.pcc_backend as p
 
 def log_exception(context: str = "Unhandled exception", label: str = "💀"):
     print(f"\n{label} {context}:")
@@ -16,6 +19,38 @@ def ensure_folder(path: Path):
 def get_audio_duration(path: Path) -> float:
     with sf.SoundFile(path) as f:
         return len(f) / f.samplerate
+
+def build_video_dialogues_for_image(
+    run_id: str,
+    img: o.OCRImage,
+    media_root: str
+) -> dict[int, d.VideoDialogueLine]:
+    video_dialogues = {}
+
+    img_ref = img.image_info.image_ref
+
+    for dlg in img.dialogue_lines:
+        if dlg.original_bbox is None:
+            raise
+
+        audio_ref = p.latest_tts_audio_ref(
+            run_id=run_id,
+            dlg_id=dlg.id,
+            img_ref=img_ref,
+            media_root=media_root
+        )
+
+        video_dialogues[dlg.id] = d.VideoDialogueLine(
+            id=dlg.id,
+            image_id=dlg.image_id,
+            text=dlg.text,
+            speaker=dlg.speaker,
+            emotion=dlg.emotion,
+            original_bbox=dlg.original_bbox,
+            audio_ref=audio_ref
+        )
+
+    return video_dialogues
 
 class Timer:
     last_duration = 0.0
