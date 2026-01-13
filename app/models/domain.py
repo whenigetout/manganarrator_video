@@ -60,6 +60,9 @@ class SegmentRenderSpan(BaseModel):
     image_scale: float
     empty_space_top: int
     empty_space_bottom: int
+    empty_space_left: int
+    empty_space_right: int
+
 
 class Segment(BaseModel):
     segment_id: int

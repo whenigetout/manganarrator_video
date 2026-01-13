@@ -100,6 +100,7 @@ class ChapterVideoBuilder:
             dlg_by_id: Dict[int, d.VideoDialogueLine],
             image_scale: float,
             top_padding: int,
+            side_margin: int,
             bottom_padding: int,
             viewport_w: int,
             viewport_h: int,
@@ -184,6 +185,8 @@ class ChapterVideoBuilder:
             image_scale=image_scale,
             empty_space_top=int(empty_space_top),
             empty_space_bottom=int(empty_space_bottom),
+            empty_space_left=side_margin,
+            empty_space_right=side_margin
         )
             
         return d.RenderedSegment(
@@ -229,8 +232,10 @@ class ChapterVideoBuilder:
             dlg_by_id: Dict[int, d.VideoDialogueLine]
     ) -> d.ImagePreview:
         
-        viewport_w, viewport_h = render_config.viewport_w - 2 * render_config.side_margin_px, render_config.viewport_h
-        image_scale = viewport_w / img_info.image_width
+        viewport_w, viewport_h = render_config.viewport_w, render_config.viewport_h
+        content_w = render_config.viewport_w - 2 * render_config.side_margin_px
+        image_scale = content_w / img_info.image_width
+
         # split img into segments
 
         img_segments = self.segments_from_img(
@@ -250,7 +255,8 @@ class ChapterVideoBuilder:
                                         bottom_padding=render_config.last_dialog_bottom_padding,
                                         viewport_w=viewport_w,
                                         viewport_h=viewport_h,
-                                        img_info=img_info
+                                        img_info=img_info,
+                                        side_margin=render_config.side_margin_px
                                     ) for seg in img_segments]
         img_base_timeline = [self.rendered_segment_to_preview(
                                     rend_seg=rend_seg,
@@ -293,14 +299,147 @@ class ChapterVideoBuilder:
 
 
     def build_video_from_ocrrun(
-            self,
-            build_vid_input: d.BuildVideoInput
-    ):
-        try:
-            ocrrun, render_config = build_vid_input.ocr_run, build_vid_input.render_config
-            video_preview = d.VideoPreview(
-                run_id=ocrrun.run_id,
-                image_previews=self.build_all_img_previews(build_vid_input=build_vid_input)
+        self,
+        build_vid_input: d.BuildVideoInput,
+    ) -> Path:
+        """
+        Build the final video by:
+        - generating preview (geometry + timing)
+        - rendering many small temp clips (dialogue-level)
+        - concatenating via stream copy (no re-encode)
+        """
+
+        ocrrun = build_vid_input.ocr_run
+        render_config = build_vid_input.render_config
+
+        # 1. Build preview (single source of truth)
+        video_preview = d.VideoPreview(
+            run_id=ocrrun.run_id,
+            image_previews=self.build_all_img_previews(build_vid_input),
+        )
+
+        # 2. Resolve temp root (same folder as OCR JSON)
+        ocr_json_path = Path(ocrrun.ocr_json_file.resolve(Path(self.config.media_root)))
+        tmp_root = ocr_json_path.parent / "video_tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+
+        image_level_videos: list[Path] = []
+
+        # 3. Iterate preview structure
+        for img_idx, img_prev in enumerate(video_preview.image_previews, start=1):
+            img_temp_files: list[Path] = []
+            img_dir = tmp_root / f"img_{img_idx:03d}"
+            img_dir.mkdir(exist_ok=True)
+
+            for seg_idx, seg_preview in enumerate(img_prev.base_timeline, start=1):
+                seg_dir = img_dir / f"seg_{seg_idx:03d}"
+                seg_dir.mkdir(exist_ok=True)
+
+                rend = seg_preview.rendered_segment
+                span = rend.render_span
+                vp = rend.viewport_size
+
+                # --- build base visual clip (no audio yet) ---
+                img_path = Path(rend.segment.image_info.image_ref.resolve(Path(self.config.media_root)))
+
+                base_clip = (
+                    FClip.image(img_path, fps=render_config.fps)
+                    .scale(w=vp.w, h=None)
+                    .pad(
+                        w=render_config.viewport_w,
+                        h=int(
+                            (rend.segment.image_info.image_height * span.image_scale)
+                            + span.empty_space_top
+                            + span.empty_space_bottom
+                        ),
+                        x=span.empty_space_left,
+                        y=span.empty_space_top,
+                    )
+                    .crop(
+                        w=render_config.viewport_w,
+                        h=render_config.viewport_h,
+                        x=0,
+                        y=span.crop_y1,
+                    )
+                    .set_fps(render_config.fps)
+                    .format(render_config.pix_fmt)
+                )
+
+                # --- case A: no dialogues → one silent clip ---
+                if not seg_preview.video_dialogue_lines:
+                    out_path = seg_dir / "silent.mp4"
+
+                    clip = (
+                        base_clip
+                        .ensure_audio_track(
+                            duration=seg_preview.duration,
+                            sample_rate=44100,
+                        )
+                    )
+
+                    clip.output(
+                        out_path,
+                        vcodec=render_config.vcodec,
+                        acodec=render_config.acodec,
+                        audio_bitrate=render_config.audio_bitrate,
+                        pix_fmt=render_config.pix_fmt,
+                        verbose=render_config.verbose,
+                    )
+
+                    img_temp_files.append(out_path)
+                    continue
+
+                # --- case B: one clip per dialogue ---
+                for dlg_idx, dlg in enumerate(seg_preview.video_dialogue_lines, start=1):
+                    out_path = seg_dir / f"dlg_{dlg_idx:03d}_id_{dlg.id}.mp4"
+
+                    audio_path = Path(dlg.audio_ref.resolve(Path(self.config.media_root)))
+                    audio_duration = utils.get_audio_duration(audio_path)
+
+                    clip = (
+                        base_clip
+                        .with_audio(audio_path)
+                        .ensure_video_track(
+                            duration=audio_duration,
+                            width=vp.w,
+                            height=vp.h,
+                        )
+                    )
+
+                    clip.output(
+                        out_path,
+                        vcodec=render_config.vcodec,
+                        acodec=render_config.acodec,
+                        audio_bitrate=render_config.audio_bitrate,
+                        pix_fmt=render_config.pix_fmt,
+                        verbose=render_config.verbose,
+                    )
+
+                    img_temp_files.append(out_path)
+
+            img_out = img_dir / f"img_{img_idx:03d}.mp4"
+
+            if not img_temp_files:
+                raise ex.BuildVideoError(f"No clips produced for image {img_idx}")
+
+            concat_files(
+                paths=img_temp_files,
+                out_path=img_out,
+                overwrite=True,
+                verbose=render_config.verbose,
             )
-        except Exception as e:
-            raise ex.BuildVideoError(str(e)) from e
+
+            image_level_videos.append(img_out)
+
+
+        # 4. Final concat (stream copy)
+        final_out = tmp_root.parent / f"{ocrrun.run_id}_final.mp4"
+
+        concat_files(
+            paths=image_level_videos,
+            out_path=final_out,
+            overwrite=True,
+            verbose=render_config.verbose,
+        )
+
+        return final_out
