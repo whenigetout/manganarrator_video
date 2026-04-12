@@ -13,6 +13,21 @@ def log_exception(context: str = "Unhandled exception", label: str = "💀"):
     print(f"\n{label} {context}:")
     traceback.print_exc()
 
+# --- Console Color Helpers ---
+class LogColor:
+    RESET = "\033[0m"
+    CYAN = "\033[96m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    MAGENTA = "\033[95m"
+    BLUE = "\033[94m"
+
+def log(msg: str, color=LogColor.CYAN, indent: int = 0):
+    prefix = "    " * indent
+    print(f"{color}{prefix}{msg}{LogColor.RESET}")
+
+
 def ensure_folder(path: Path):
     path.mkdir(parents=True, exist_ok=True)
 
