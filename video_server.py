@@ -17,7 +17,6 @@ from jobs.jobs_db import (
     create_job,
     update_job,
     get_job,
-    run_async_job
 )
 from jobs.decorators import async_job
 from contextlib import asynccontextmanager
@@ -120,8 +119,8 @@ def build_video_preview_from_ocrrun(
             detail=f"Video preview build failed: {str(e)}",
         )
 
-@app.post("/video/build/ocrrun")
-@async_job("build_ocrrun")
+@app.post("/video/build/ocrrun", response_model=d.JobCreateResponse)
+@async_job(d.JobType.build_ocrrun)
 def build_video_from_ocrrun(
     ocrrun: o.OCRRun = Body(...),
     regen_existing_clips: bool = False,
@@ -159,8 +158,8 @@ def build_video_from_ocrrun(
             detail=f"Final video build failed: {str(e)}",
         )
 
-@app.post("/video/build/from_preview")
-@async_job("build_from_preview")
+@app.post("/video/build/from_preview", response_model=d.JobCreateResponse)
+@async_job(d.JobType.build_from_preview)
 def build_video_from_preview(
     video_preview: d.VideoPreview = Body(...),
     regen_existing_clips: bool = False,
@@ -182,8 +181,8 @@ def build_video_from_preview(
             detail=f"Video build from preview failed: {str(e)}",
         )
 
-@app.post("/video/build/image")
-@async_job("build_image")
+@app.post("/video/build/image", response_model=d.JobCreateResponse)
+@async_job(d.JobType.build_image)
 def build_image_video(
     image_preview: d.ImagePreview = Body(...),
     regen_existing_clips: bool = False,
@@ -210,8 +209,8 @@ def build_image_video(
             detail=f"Image video build failed: {str(e)}",
         )
 
-@app.post("/video/build/segment")
-@async_job("build_segment")
+@app.post("/video/build/segment", response_model=d.JobCreateResponse)
+@async_job(d.JobType.build_segment)
 def build_segment_video(
     segment_preview: d.SegmentPreview = Body(...),
 ):
@@ -241,6 +240,9 @@ def get_video_status(job_id: str):
     job = get_job(job_id)
 
     if not job:
-        return {"status": "not_found"}
+        return d.JobResponse(
+            job_id=job_id,
+            status=d.JobStatus.not_found
+        )
 
     return job

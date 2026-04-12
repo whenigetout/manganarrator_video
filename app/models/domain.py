@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field
 from pathlib import Path
-from typing import Literal, Any, Optional, List, Tuple
+from typing import Literal, Any, Optional, List, Union
 from mn_contracts import ocr as o
 import app.models.exceptions as ex
+from enum import Enum
 
 # how ffmpeg should behave
 class RenderConfig(BaseModel):
@@ -118,3 +119,30 @@ def to_video_dialogue(dlg: o.DialogueLine, audio_ref: o.MediaRef) -> VideoDialog
         original_bbox=dlg.original_bbox,
         audio_ref=audio_ref,
     )
+
+# for background jobs
+class JobStatus(str, Enum):
+    processing = "processing"
+    done = "done"
+    failed = "failed"
+    not_found = "not_found"
+
+class JobType(str, Enum):
+    build_ocrrun = "build_ocrrun"
+    build_image = "build_image"
+    build_segment = "build_segment"
+    build_from_preview = "build_from_preview"
+
+class JobResult(BaseModel):
+    type: JobType
+    data: Union[o.MediaRef, dict]
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    result: Optional[JobResult] = None
+    error: Optional[str] = None
+
+class JobCreateResponse(BaseModel):
+    status: JobStatus  # always "processing"
+    job_id: str
