@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from typing import List, Tuple, Optional
 from pydantic import BaseModel
+import json
 import app.models.domain as d
 from app.config import VideoConfig
 from app.chapter_video_builder import (
@@ -117,6 +118,51 @@ def build_video_preview_from_ocrrun(
         raise HTTPException(
             status_code=500,
             detail=f"Video preview build failed: {str(e)}",
+        )
+
+@app.get("/video/preview/load", response_model=d.VideoPreview)
+def load_video_preview(
+    namespace: o.MediaNamespace = Query(...),
+    path: str = Query(...),
+):
+    try:
+        ocr_json_ref = o.MediaRef(namespace=namespace, path=path)
+        ocr_json_path = Path(ocr_json_ref.resolve(builder.config.media_root))
+        preview_json_path = ocr_json_path.parent / "video_preview" / "preview.json"
+
+        with preview_json_path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        return d.VideoPreview.model_validate(raw)
+    except Exception as e:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Video preview load failed: {str(e)}",
+        )
+
+@app.post("/video/preview/save")
+def save_video_preview(
+    video_preview: d.VideoPreview = Body(...),
+):
+    try:
+        video_tmp_dir = Path(video_preview.out_dir_ref.resolve(builder.config.media_root))
+        preview_json_path = video_tmp_dir.parent / "video_preview" / "preview.json"
+        c.save_model_json(video_preview, preview_json_path)
+
+        preview_json_ref = c.build_media_Ref(
+            namespace=o.MediaNamespace.OUTPUTS,
+            path=preview_json_path,
+            media_root=builder.config.media_root,
+        )
+
+        return {
+            "status": "ok",
+            "video_preview_ref": preview_json_ref,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Video preview save failed: {str(e)}",
         )
 
 @app.post("/video/build/ocrrun", response_model=d.JobCreateResponse)

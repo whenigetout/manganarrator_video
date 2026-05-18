@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from app.config import VideoConfig
 from typing import Optional
 import subprocess, shlex
+import ffmpeg
 import app.models.domain as d
 import app.models.api as a
 import mn_contracts.ocr as o
@@ -30,6 +31,97 @@ class ChapterVideoBuilder:
         cmd = f'ffmpeg -y -f lavfi -i anullsrc=r={sr}:cl=stereo -t {seconds} "{out_wav}"'
         subprocess.run(shlex.split(cmd), check=True)
         return out_wav
+
+    def _enabled_audio_layers(self, audio_layers: List[d.AudioLayer]) -> List[d.AudioLayer]:
+        return [layer for layer in audio_layers if layer.enabled]
+
+    def _mix_audio_layers_into_video(
+        self,
+        *,
+        video_path: Path,
+        audio_layers: List[d.AudioLayer],
+        render_config: d.RenderConfig,
+        base_duration: float,
+    ) -> Path:
+        enabled_layers = self._enabled_audio_layers(audio_layers)
+        if not enabled_layers:
+            return video_path
+
+        input_video = ffmpeg.input(str(video_path))
+        mixed_inputs = [
+            input_video.audio.filter("aresample", render_config.audio_default_sample_rate)
+        ]
+
+        for layer in enabled_layers:
+            input_kwargs: dict[str, Any] = {}
+            if layer.loop:
+                input_kwargs["stream_loop"] = -1
+
+            layer_path = Path(layer.media_ref.resolve(Path(self.config.media_root)))
+            layer_audio = ffmpeg.input(str(layer_path), **input_kwargs).audio
+
+            trim_kwargs: dict[str, float] = {}
+            if layer.trim_start_sec > 0:
+                trim_kwargs["start"] = layer.trim_start_sec
+            if layer.trim_end_sec is not None:
+                trim_kwargs["end"] = layer.trim_end_sec
+            if trim_kwargs:
+                layer_audio = layer_audio.filter("atrim", **trim_kwargs)
+
+            layer_audio = layer_audio.filter("asetpts", "PTS-STARTPTS")
+
+            if layer.volume != 1.0:
+                layer_audio = layer_audio.filter("volume", layer.volume)
+
+            if layer.fade_in_sec > 0:
+                layer_audio = layer_audio.filter("afade", t="in", st=0, d=layer.fade_in_sec)
+
+            if layer.fade_out_sec > 0:
+                source_duration = utils.get_audio_duration(layer_path)
+                visible_duration = max(0.0, base_duration - layer.start_at)
+                if not layer.loop:
+                    trimmed_duration = source_duration - layer.trim_start_sec
+                    if layer.trim_end_sec is not None:
+                        trimmed_duration = max(0.0, layer.trim_end_sec - layer.trim_start_sec)
+                    visible_duration = min(visible_duration, max(0.0, trimmed_duration))
+
+                fade_start = max(0.0, visible_duration - layer.fade_out_sec)
+                layer_audio = layer_audio.filter("afade", t="out", st=fade_start, d=layer.fade_out_sec)
+
+            delay_ms = max(0, int(layer.start_at * 1000))
+            if delay_ms > 0:
+                layer_audio = layer_audio.filter("adelay", f"{delay_ms}|{delay_ms}")
+
+            mixed_inputs.append(
+                layer_audio.filter("aresample", render_config.audio_default_sample_rate)
+            )
+
+        mixed_audio = ffmpeg.filter(
+            mixed_inputs,
+            "amix",
+            inputs=len(mixed_inputs),
+            duration="first",
+            dropout_transition=0,
+        )
+
+        temp_out_path = video_path.with_name(f"{video_path.stem}.__mixing__.mp4")
+        (
+            ffmpeg
+            .output(
+                input_video.video,
+                mixed_audio,
+                str(temp_out_path),
+                vcodec="copy",
+                acodec=render_config.acodec,
+                audio_bitrate=render_config.audio_bitrate,
+                shortest=None,
+            )
+            .overwrite_output()
+            .run(quiet=not render_config.verbose)
+        )
+
+        temp_out_path.replace(video_path)
+        return video_path
 
     def should_dlg_be_in_segment(
         self,
@@ -288,6 +380,8 @@ class ChapterVideoBuilder:
             rendered_segment=rend_seg,
             duration=duration,
             video_dialogue_lines=assigned_dialogue_lines,
+            include_in_output=True,
+            audio_layers=[],
             out_dir_ref=c.build_media_Ref(
                 namespace=o.MediaNamespace.OUTPUTS,
                 path=Path(seg_root),
@@ -363,6 +457,8 @@ class ChapterVideoBuilder:
             run_id=run_id,
             image_id=image_id,
             base_timeline=img_base_timeline,
+            include_in_output=True,
+            audio_layers=[],
             out_dir_ref=c.build_media_Ref(
                 namespace=o.MediaNamespace.OUTPUTS,
                 path=img_root,
@@ -414,6 +510,7 @@ class ChapterVideoBuilder:
             run_id=build_vid_input.ocr_run.run_id,
             image_previews=self.build_all_img_previews(build_vid_input, tmp_root=tmp_root),
             render_config=build_vid_input.render_config,
+            audio_layers=[],
             out_dir_ref=c.build_media_Ref(
                 namespace=o.MediaNamespace.OUTPUTS,
                 path=tmp_root,
@@ -444,8 +541,7 @@ class ChapterVideoBuilder:
         seg_preview: d.SegmentPreview,
         render_config: d.RenderConfig
     ):
-        silent_video_filename = f"{seg_dir.stem}_silent.mp4"
-        seg_vid_out_path = seg_dir / silent_video_filename
+        seg_vid_out_path = seg_preview.out_file_ref.resolve(self.config.media_root)
 
         clip = (
             base_clip
@@ -545,7 +641,7 @@ class ChapterVideoBuilder:
             if not seg_temp_files:
                 raise ex.BuildVideoError(f"No clips produced for image {img_idx} segment {seg_idx}")
             
-            seg_video_out = seg_dir / f"seg_{seg_idx:03d}_with_dialogues.mp4"
+            seg_video_out = seg_preview.out_file_ref.resolve(self.config.media_root)
 
             concat_files(
                 paths=seg_temp_files,
@@ -649,6 +745,13 @@ class ChapterVideoBuilder:
                     viewport_size=vp
                 )
 
+            self._mix_audio_layers_into_video(
+                video_path=seg_vid_out_path,
+                audio_layers=seg_preview.audio_layers,
+                render_config=render_config,
+                base_duration=seg_preview.duration,
+            )
+
             return c.build_media_Ref(
                 namespace=o.MediaNamespace.OUTPUTS,
                 path=seg_vid_out_path,
@@ -673,6 +776,9 @@ class ChapterVideoBuilder:
         img_idx = img_prw.image_id
 
         for seg_preview in img_prw.base_timeline:
+            if not seg_preview.include_in_output:
+                continue
+
             seg_id = seg_preview.rendered_segment.segment.segment_id
             log(f"🎞️  Segment {seg_id}", LogColor.CYAN, 4)
 
@@ -706,6 +812,15 @@ class ChapterVideoBuilder:
             verbose=render_config.verbose,
         )
 
+        self._mix_audio_layers_into_video(
+            video_path=img_out,
+            audio_layers=img_prw.audio_layers,
+            render_config=render_config,
+            base_duration=sum(
+                seg.duration for seg in img_prw.base_timeline if seg.include_in_output
+            ),
+        )
+
         return c.build_media_Ref(
             namespace=o.MediaNamespace.OUTPUTS,
             path=img_out,
@@ -723,6 +838,9 @@ class ChapterVideoBuilder:
 
         # 3. Iterate preview structure
         for img_idx, img_prw in enumerate(video_preview.image_previews, start=1):
+            if not img_prw.include_in_output:
+                continue
+
             log(f"🖼️  Building image {img_prw.image_id}", LogColor.GREEN, 2)
     
             img_vid_ref_from_preview = img_prw.out_file_ref
@@ -767,6 +885,19 @@ class ChapterVideoBuilder:
             out_path=final_out,
             overwrite=True,
             verbose=video_preview.render_config.verbose,
+        )
+
+        self._mix_audio_layers_into_video(
+            video_path=final_out,
+            audio_layers=video_preview.audio_layers,
+            render_config=video_preview.render_config,
+            base_duration=sum(
+                seg.duration
+                for img in video_preview.image_previews
+                if img.include_in_output
+                for seg in img.base_timeline
+                if seg.include_in_output
+            ),
         )
 
         log("✅ Final concat done.", LogColor.GREEN, 2)

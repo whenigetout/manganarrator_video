@@ -45,6 +45,19 @@ class VideoDialogueLine(BaseModel):
     original_bbox: o.OriginalImageBBox
     audio_ref: o.MediaRef
 
+class AudioLayer(BaseModel):
+    id: str
+    label: str
+    media_ref: o.MediaRef
+    start_at: float = 0.0
+    volume: float = 1.0
+    loop: bool = False
+    enabled: bool = True
+    trim_start_sec: float = 0.0
+    trim_end_sec: Optional[float] = None
+    fade_in_sec: float = 0.0
+    fade_out_sec: float = 0.0
+
 class SegmentRenderSpan(BaseModel):
     # SegmentRenderSpan describes the FINAL, ffmpeg-safe render intent.
     #
@@ -83,6 +96,8 @@ class SegmentPreview(BaseModel):
     rendered_segment: RenderedSegment
     duration: float
     video_dialogue_lines: List[VideoDialogueLine] = Field(default_factory=list)
+    include_in_output: bool = True
+    audio_layers: List[AudioLayer] = Field(default_factory=list)
     out_dir_ref: o.MediaRef
     out_file_ref: o.MediaRef
 
@@ -90,6 +105,8 @@ class ImagePreview(BaseModel):
     run_id: str
     image_id: int
     base_timeline: List[SegmentPreview]
+    include_in_output: bool = True
+    audio_layers: List[AudioLayer] = Field(default_factory=list)
     out_dir_ref: o.MediaRef
     out_file_ref: o.MediaRef
 
@@ -97,6 +114,7 @@ class VideoPreview(BaseModel):
     run_id: str
     image_previews: List[ImagePreview]
     render_config: RenderConfig
+    audio_layers: List[AudioLayer] = Field(default_factory=list)
     out_dir_ref: o.MediaRef
     out_file_ref: o.MediaRef
 
