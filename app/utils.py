@@ -46,7 +46,8 @@ def build_video_dialogues_for_image(
 
     for dlg in img.dialogue_lines:
         if dlg.original_bbox is None:
-            raise
+            print(f"[video] Warning: dialogue line id={dlg.id} on image {img.image_info.image_ref.path} has no bbox — skipping from video")
+            continue
 
         audio_ref = p.latest_tts_audio_ref(
             run_id=run_id,
