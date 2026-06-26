@@ -340,201 +340,6 @@ class ChapterVideoBuilder:
             segment=segment,
             render_span=render_span,
             viewport_size=d.Size(
-        bottom_ok = bbox_y2_scaled <= start_y2 - bottom_padding
-
-        if top_ok and bottom_ok:
-            return True
-
-        if not top_ok and bottom_ok:
-            # split at top
-            if bbox_y2_scaled - start_y1 >= (bbox_y2_scaled - bbox_y1_scaled) / 2:
-                return True
-
-        if top_ok and not bottom_ok:
-            # split at bottom
-            if start_y2 - bbox_y1_scaled >= (bbox_y2_scaled - bbox_y1_scaled) / 2:
-                return True
-            
-        return False
-
-
-    def assigned_dialogues(
-        self,
-        dlg_by_id: Dict[int, d.VideoDialogueLine],
-        image_scale: float,
-        top_padding: int,
-        bottom_padding: int,
-        viewport_h: int,
-        start_y1: int,
-        start_y2: int
-    ):
-        result = []
-        for dlg in dlg_by_id.values():
-
-            if self.should_dlg_be_in_segment(
-                dlg=dlg,
-                image_scale=image_scale,
-                top_padding=top_padding,
-                bottom_padding=bottom_padding,
-                viewport_h=viewport_h,
-                start_y1=start_y1,
-                start_y2=start_y2
-            ):
-                result.append(dlg.id)
-        
-        return result
-
-
-    def segments_from_img(
-            self,
-            img_info: o.ImageInfo,
-            image_id: int,
-            run_id: str,
-            image_scale: float,
-            dlg_by_id: Dict[int, d.VideoDialogueLine],
-            top_padding: int,
-            bottom_padding: int,
-            viewport_h: int,
-            scaled_h: int
-    ) -> List[d.Segment]:
-        
-        img_h_scaled = scaled_h
-        total_segment_count = math.ceil(img_h_scaled / viewport_h)
-        segments: List[d.Segment] = []
-        start_y1 = 0
-        for idx in range(total_segment_count):
-            start_y2 = start_y1 + viewport_h
-
-            segment = d.Segment(
-                segment_id=idx + 1, # ids start from 1, just being consistent with image and dialogueline ids which also start from 1
-                image_id=image_id,
-                run_id=run_id,
-                base_y1=start_y1,
-                base_y2=start_y2,
-                image_info=img_info,
-                video_dialogue_ids=self.assigned_dialogues(
-                    dlg_by_id=dlg_by_id,
-                    image_scale=image_scale,
-                    top_padding=top_padding,
-                    bottom_padding=bottom_padding,
-                    viewport_h=viewport_h,
-                    start_y1=start_y1,
-                    start_y2=start_y2
-                )
-            )
-
-            segments.append(segment)
-            start_y1 += viewport_h
-        
-        return segments
-
-    def segment_to_rendered_segment(
-        self,
-        segment: d.Segment,
-        dlg_by_id: Dict[int, d.VideoDialogueLine],
-        image_scale: float,
-        top_padding: int,
-        side_margin: int,
-        bottom_padding: int,
-        viewport_w: int,
-        viewport_h: int,
-        img_info: o.ImageInfo,
-        scaled_h: int
-    ) -> d.RenderedSegment:
-        crop_y1, crop_y2 = segment.base_y1, segment.base_y2
-        if len(segment.video_dialogue_ids) > 0:
-            # first dialogue
-            first_dlg_id = segment.video_dialogue_ids[0]
-            first_dlg_bbox = dlg_by_id[first_dlg_id].original_bbox
-            first_bbox_y1_scaled = first_dlg_bbox.y1 * image_scale
-            if first_bbox_y1_scaled < crop_y1 + top_padding:
-                # stretch top edge above the first dlg
-                crop_y1 = first_bbox_y1_scaled - top_padding
-
-            # last dialgoue
-            last_dlg_id = segment.video_dialogue_ids[-1]
-            last_dlg_bbox = dlg_by_id[last_dlg_id].original_bbox
-            last_bbox_y2_scaled = last_dlg_bbox.y2 * image_scale
-            if last_bbox_y2_scaled > crop_y2 - bottom_padding:
-                # stretch bottom edge below last dlg
-                crop_y2 = last_bbox_y2_scaled + bottom_padding
-
-        base_y1, base_y2 = segment.base_y1, segment.base_y2
-
-        top_conflict = crop_y1 < base_y1
-        bottom_conflict = crop_y2 > base_y2
-
-        render_height = crop_y2 - crop_y1
-
-        if render_height > viewport_h:
-            # both edges conflicting
-            # If both top and bottom overflow, we prioritize the first dialogue
-            # and clamp the opposite edge. This avoids padding or distortion.
-
-            if top_conflict and bottom_conflict:
-                # prioritize first dialogue (top)
-                crop_y2 = crop_y1 + viewport_h
-            elif top_conflict:
-                crop_y2 = crop_y1 + viewport_h
-            elif bottom_conflict:
-                crop_y1 = crop_y2 - viewport_h
-            else:
-                # should never happen, but be defensive
-                raise ex.BuildVideoError(
-                    f"Render span overflow without edge conflict: {render_height} > {viewport_h}"
-                )
-            
-        # At this point, crop_y1 / crop_y2 represent the *desired* visible region
-        # in scaled-image coordinates.
-        #
-        # They are allowed to go out of bounds intentionally:
-        #   - crop_y1 < 0  => we want black space above the image
-        #   - crop_y2 > img_h_scaled => we want black space below the image
-        #
-        # ffmpeg does NOT allow out-of-bounds crop coordinates, so we normalize
-        # this by conceptually embedding the image inside a padded canvas.
-        # The padding amounts below represent real black space that will be
-        # materialized via ffmpeg's pad filter.
-
-
-        img_h_scaled = scaled_h
-        empty_space_top = max(0, -crop_y1)
-        empty_space_bottom = max(0, crop_y2 - img_h_scaled)
-        padded_img_h = img_h_scaled + empty_space_top + empty_space_bottom
-        crop_y1_padded = crop_y1 + empty_space_top
-        crop_y2_padded = crop_y2 + empty_space_top
-
-        # clamp calculated crop values to prevent overflow bugs later
-        crop_y1_padded = max(0, crop_y1_padded)
-        crop_y2_padded = min(
-            scaled_h + empty_space_top + empty_space_bottom,
-            crop_y2_padded
-        )
-
-        # Shift crop coordinates into the padded image coordinate system.
-        # After this transformation:
-        #   - crop_y1_padded >= 0
-        #   - crop_y2_padded <= padded image height
-        #
-        # This guarantees the crop box is always valid for ffmpeg,
-        # while preserving the original visual intent exactly.
-
-
-        render_span = d.SegmentRenderSpan(
-            crop_y1=int(crop_y1_padded),
-            crop_y2=int(crop_y2_padded),
-            render_height=int(crop_y2_padded - crop_y1_padded),
-            image_scale=image_scale,
-            empty_space_top=int(empty_space_top),
-            empty_space_bottom=int(empty_space_bottom),
-            empty_space_left=side_margin,
-            empty_space_right=side_margin
-        )
-            
-        return d.RenderedSegment(
-            segment=segment,
-            render_span=render_span,
-            viewport_size=d.Size(
                 w=viewport_w,
                 h=viewport_h
             )
@@ -576,8 +381,7 @@ class ChapterVideoBuilder:
             duration=duration,
             video_dialogue_lines=assigned_dialogue_lines,
             include_in_output=True,
-            # silent_duration_override is None on first build — user can set per-segment overrides
-            # in the frontend. When set, the render phase will use it instead of the global default.
+            # None on first build — user can set per-segment overrides via the frontend
             silent_duration_override=None,
             audio_layers=[],
             out_dir_ref=c.build_media_Ref(
@@ -741,10 +545,8 @@ class ChapterVideoBuilder:
     ):
         seg_vid_out_path = seg_preview.out_file_ref.resolve(self.config.media_root)
 
-        # Use the per-segment override if set, otherwise fall back to global default.
-        # seg_preview.duration is set to the global default at preview-build time,
-        # but the user may have changed silent_duration_override in the frontend,
-        # in which case we honour that here.
+        # Use the per-segment override if set, otherwise fall back to seg_preview.duration
+        # (which was set to the global default at preview-build time).
         silent_duration = (
             seg_preview.silent_duration_override
             if seg_preview.silent_duration_override is not None
