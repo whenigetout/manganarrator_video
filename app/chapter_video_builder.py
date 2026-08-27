@@ -1062,6 +1062,25 @@ class ChapterVideoBuilder:
             chain += ",transpose=1"
         return f"{chain}[{out_label}]"
 
+
+    def _video_encoder_args(self, render_config: d.RenderConfig) -> list[str]:
+        args = ["-c:v", render_config.vcodec]
+        vcodec = render_config.vcodec.lower()
+        if "nvenc" in vcodec:
+            args.extend([
+                "-preset",
+                render_config.preset,
+                "-tune",
+                render_config.tune,
+                "-cq",
+                str(render_config.cq),
+                "-rc",
+                "vbr",
+                "-multipass",
+                "disabled",
+            ])
+        return args
+
     def build_audio_video(self, request: d.AudioVideoRequest) -> o.MediaRef:
         render_config = request.render_config
         width = render_config.viewport_w
@@ -1145,8 +1164,7 @@ class ChapterVideoBuilder:
             f"{duration:.3f}",
             "-r",
             str(fps),
-            "-c:v",
-            render_config.vcodec,
+            *self._video_encoder_args(render_config),
             "-pix_fmt",
             render_config.pix_fmt,
             "-c:a",

@@ -211,6 +211,32 @@ Set `background.mode` to `media` and pass one or more `media_refs`. The backend 
 
 The background video is scaled to fill the configured output resolution, cropped to fit, repeated if the audio is longer, and trimmed at the audio end.
 
+
+### Fast NVIDIA GPU Encoding
+
+For the fastest local renders on an NVIDIA GPU, use `h264_nvenc` with the fastest NVENC preset:
+
+```json
+{
+  "render_config": {
+    "viewport_w": 1280,
+    "viewport_h": 720,
+    "fps": 24,
+    "vcodec": "h264_nvenc",
+    "preset": "p1",
+    "tune": "ull",
+    "cq": 28,
+    "pix_fmt": "yuv420p",
+    "acodec": "aac",
+    "audio_bitrate": "192k"
+  }
+}
+```
+
+`p1` is the fastest NVENC preset. `ull` is ultra-low-latency tuning. Increasing `cq` is faster/smaller/lower quality; decreasing it is slower/larger/higher quality. A practical range is `23` to `30`.
+
+The reactive visualizer and generated abstract background filters still run through FFmpeg's filter graph, which can be CPU-heavy. NVENC moves final video encoding to the GPU, but extremely high generated-background resolutions such as `2560x1440` can still take time. For quick tests, use `1280x720`; for final uploads, switch back to `2560x1440` or your target resolution.
+
 ### Customization Reference
 
 `render_config` controls the final video container and encoding:
