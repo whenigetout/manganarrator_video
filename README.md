@@ -47,6 +47,33 @@ uvicorn video_server:app --host 127.0.0.1 --port 8000 --reload
 
 `python-multipart` is required for the upload endpoint and is now included in `requirements.txt`.
 
+
+### Correct Curl Commands
+
+For PowerShell, run this from the folder that contains `new_divide_1.mp3` and `audio_video_config.json`:
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8084/video/build/audio_upload" `
+  -F "audio_file=@new_divide_1.mp3" `
+  -F "config_json=<audio_video_config.json"
+```
+
+For Git Bash:
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8084/video/build/audio_upload" \
+  -F "audio_file=@new_divide_1.mp3" \
+  -F "config_json=<audio_video_config.json"
+```
+
+Important details:
+
+- Use the plain URL, not Markdown link text.
+- The file upload field must be `audio_file=@filename.mp3`; the `@` tells curl to upload file contents.
+- The config field must be named `config_json`, without a backslash.
+- MP3 and WAV inputs are supported as long as your installed FFmpeg can read them.
+- A 422 response usually means curl did not send the multipart fields with the names/types FastAPI expects.
+
 ### Quick Test With An Uploaded Audio File
 
 Create a config file, for example `audio_video_config.json`:
