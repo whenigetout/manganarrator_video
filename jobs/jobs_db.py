@@ -40,6 +40,13 @@ def create_job(job_type: JobType = JobType.build_image):
     return job_id
 
 
+def _json_default(value):
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
 def update_job(job_id: str, status: JobStatus, result=None, error: str | None = None):
     with get_conn() as conn:
         conn.execute("""
@@ -48,7 +55,7 @@ def update_job(job_id: str, status: JobStatus, result=None, error: str | None = 
         WHERE job_id = ?
         """, (
             status.value,
-            json.dumps(result) if result else None,
+            json.dumps(result, default=_json_default) if result else None,
             error,
             job_id
         ))

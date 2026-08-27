@@ -31,6 +31,40 @@ class RenderConfig(BaseModel):
     capture_stderr: bool = False
     keep_segments: bool = False
 
+class AudioVideoBackgroundConfig(BaseModel):
+    mode: Literal["generated", "media"] = "generated"
+    media_refs: List[o.MediaRef] = Field(default_factory=list)
+    generated_style: Literal["aurora", "nebula", "gradient", "plasma"] = "aurora"
+    color_a: str = "#111827"
+    color_b: str = "#ec4899"
+    color_c: str = "#22d3ee"
+    blur: int = 28
+    playback_rate: float = 1.0
+
+class AudioVisualizerConfig(BaseModel):
+    enabled: bool = True
+    kind: Literal["circular", "horizontal", "vertical"] = "circular"
+    position: Literal["center", "top_left", "top_right", "bottom_left", "bottom_right", "top", "bottom", "left", "right"] = "bottom_right"
+    width: int = 420
+    height: int = 420
+    margin_x: int = 96
+    margin_y: int = 96
+    opacity: float = 0.95
+    colors: str = "0x22d3ee|0xec4899|0xfacc15|0xa78bfa"
+    mode: Literal["bar", "line", "dot"] = "bar"
+    scale: Literal["lin", "sqrt", "cbrt", "log"] = "sqrt"
+    frequency_bins: int = 96
+    gain: float = 1.0
+    background_opacity: float = 0.0
+
+class AudioVideoRequest(BaseModel):
+    audio_ref: o.MediaRef
+    run_id: Optional[str] = None
+    output_name: str = "audio_visualizer_video.mp4"
+    render_config: RenderConfig = Field(default_factory=lambda: RenderConfig(viewport_w=2560, viewport_h=1440, fps=30))
+    background: AudioVideoBackgroundConfig = Field(default_factory=AudioVideoBackgroundConfig)
+    visualizers: List[AudioVisualizerConfig] = Field(default_factory=lambda: [AudioVisualizerConfig(), AudioVisualizerConfig(kind="horizontal", position="bottom", width=1800, height=220, margin_y=72, frequency_bins=128)])
+
 class Size(BaseModel):
     w: int
     h: int
@@ -150,6 +184,7 @@ class JobType(str, Enum):
     build_image = "build_image"
     build_segment = "build_segment"
     build_from_preview = "build_from_preview"
+    build_audio_video = "build_audio_video"
 
 class JobResult(BaseModel):
     type: JobType
