@@ -921,19 +921,6 @@ class ChapterVideoBuilder:
         return final_video_ref
 
 
-    def _probe_media_duration(self, path: Path) -> float:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ]
-        out = subprocess.check_output(cmd, text=True).strip()
-        return float(out)
 
     def _safe_output_name(self, name: str) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._")
@@ -943,73 +930,6 @@ class ChapterVideoBuilder:
             cleaned = f"{cleaned}.mp4"
         return cleaned
 
-    def _hex_to_rgb(self, value: str, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
-        value = value.strip().lower().replace("0x", "").lstrip("#")
-        if len(value) != 6:
-            return fallback
-        try:
-            return tuple(int(value[idx:idx + 2], 16) for idx in (0, 2, 4))
-        except ValueError:
-            return fallback
-
-    def _generated_background_filter(
-        self,
-        *,
-        label: str,
-        duration: float,
-        width: int,
-        height: int,
-        fps: int,
-        background: d.AudioVideoBackgroundConfig,
-    ) -> str:
-        c1 = self._hex_to_rgb(background.color_a, (17, 24, 39))
-        c2 = self._hex_to_rgb(background.color_b, (236, 72, 153))
-        c3 = self._hex_to_rgb(background.color_c, (34, 211, 238))
-        speed = {
-            "aurora": (0.45, 0.28),
-            "nebula": (0.22, 0.52),
-            "gradient": (0.18, 0.18),
-            "plasma": (0.75, 0.63),
-        }.get(background.generated_style, (0.45, 0.28))
-
-        def expr(channel: int) -> str:
-            base = c1[channel]
-            amp_a = c2[channel] - c1[channel]
-            amp_b = c3[channel] - c1[channel]
-            return (
-                f"{base}+{amp_a}*(0.5+0.5*sin(X/W*6.283+T*{speed[0]}))"
-                f"+{amp_b}*(0.5+0.5*sin(Y/H*6.283+T*{speed[1]}))*0.55"
-            )
-
-        blur = max(0, int(background.blur))
-        return (
-            f"nullsrc=s={width}x{height}:r={fps}:d={duration:.3f},"
-            f"geq=r={expr(0)}:g={expr(1)}:b={expr(2)},format=rgba,"
-            f"gblur=sigma={blur}[{label}]"
-        )
-
-    def _write_background_manifest(
-        self,
-        *,
-        media_paths: list[Path],
-        out_dir: Path,
-        duration: float,
-        playback_rate: float,
-    ) -> Path:
-        manifest_path = out_dir / "background_concat.txt"
-        total = 0.0
-        idx = 0
-        lines: list[str] = []
-        while total < duration + 0.5:
-            path = media_paths[idx % len(media_paths)]
-            escaped = path.resolve().as_posix().replace("'", "'\\''")
-            lines.append(f"file '{escaped}'")
-            total += max(0.1, self._probe_media_duration(path) / playback_rate)
-            idx += 1
-            if idx > 10000:
-                raise ex.BuildVideoError("Background media loop guard exceeded.")
-        manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return manifest_path
 
     def _overlay_position(self, visualizer: d.AudioVisualizerConfig, width: int, height: int) -> tuple[int, int]:
         x_left = visualizer.margin_x
@@ -1031,36 +951,6 @@ class ChapterVideoBuilder:
         }
         return positions[visualizer.position]
 
-    def _visualizer_filter(self, audio_label: str, out_label: str, visualizer: d.AudioVisualizerConfig) -> str:
-        width = max(32, int(visualizer.width))
-        height = max(32, int(visualizer.height))
-        opacity = min(1.0, max(0.0, visualizer.opacity))
-        gain = max(0.01, visualizer.gain)
-        win_size = max(1024, min(32768, int(visualizer.frequency_bins) * 32))
-        alpha_chain = "format=rgba"
-        if visualizer.background_opacity <= 0:
-            alpha_chain += ",colorkey=0x000000:0.08:0.2"
-        alpha_chain += f",colorchannelmixer=aa={opacity}"
-
-        if visualizer.kind == "circular":
-            rgb = self._hex_to_rgb(visualizer.colors.split("|")[0], (236, 72, 153))
-            return (
-                f"[{audio_label}]volume={gain},"
-                f"avectorscope=s={width}x{height}:mode=polar:draw=line:scale={visualizer.scale}:"
-                f"zoom=1.6:rc={rgb[0]}:gc={rgb[1]}:bc={rgb[2]},"
-                f"{alpha_chain}[{out_label}]"
-            )
-
-        viz_size = f"{height}x{width}" if visualizer.kind == "vertical" else f"{width}x{height}"
-        chain = (
-            f"[{audio_label}]volume={gain},"
-            f"showfreqs=s={viz_size}:mode={visualizer.mode}:ascale={visualizer.scale}:"
-            f"fscale=log:win_size={win_size}:colors={visualizer.colors},"
-            f"{alpha_chain}"
-        )
-        if visualizer.kind == "vertical":
-            chain += ",transpose=1"
-        return f"{chain}[{out_label}]"
 
 
     def _video_encoder_args(self, render_config: d.RenderConfig) -> list[str]:
@@ -1079,109 +969,13 @@ class ChapterVideoBuilder:
                 "-multipass",
                 "disabled",
             ])
+        elif vcodec == "libx264":
+            args.extend(["-preset", "veryfast", "-crf", str(render_config.cq)])
         return args
 
-    def build_audio_video(self, request: d.AudioVideoRequest) -> o.MediaRef:
-        render_config = request.render_config
-        width = render_config.viewport_w
-        height = render_config.viewport_h
-        fps = render_config.fps
-        audio_path = Path(request.audio_ref.resolve(Path(self.config.media_root)))
-        if not audio_path.exists():
-            raise ex.BuildVideoError(f"Audio file not found: {audio_path}")
-
-        duration = self._probe_media_duration(audio_path)
-        run_id = request.run_id or f"audio_video_{uuid.uuid4().hex[:12]}"
-        out_dir = Path(self.config.media_root) / o.MediaNamespace.OUTPUTS.value / "audio_video" / run_id
-        c.ensure_dir(out_dir)
-        out_path = out_dir / self._safe_output_name(request.output_name)
-
-        cmd = ["ffmpeg", "-y", "-i", str(audio_path)]
-        filters: list[str] = []
-        background_label = "bg0"
-        playback_rate = max(0.05, request.background.playback_rate)
-
-        if request.background.mode == "media" and request.background.media_refs:
-            media_paths = [
-                Path(ref.resolve(Path(self.config.media_root)))
-                for ref in request.background.media_refs
-            ]
-            missing = [str(path) for path in media_paths if not path.exists()]
-            if missing:
-                raise ex.BuildVideoError(f"Background media file(s) not found: {missing}")
-            manifest_path = self._write_background_manifest(
-                media_paths=media_paths,
-                out_dir=out_dir,
-                duration=duration,
-                playback_rate=playback_rate,
-            )
-            cmd.extend(["-f", "concat", "-safe", "0", "-i", str(manifest_path)])
-            filters.append(
-                f"[1:v]setpts=PTS/{playback_rate},scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},setsar=1,fps={fps},trim=duration={duration:.3f},"
-                f"setpts=PTS-STARTPTS,format=rgba[{background_label}]"
-            )
-        else:
-            filters.append(
-                self._generated_background_filter(
-                    label=background_label,
-                    duration=duration,
-                    width=width,
-                    height=height,
-                    fps=fps,
-                    background=request.background,
-                )
-            )
-
-        visualizers = [viz for viz in request.visualizers if viz.enabled]
-        if visualizers:
-            split_outputs = "[aout]" + "".join(f"[av{idx}]" for idx in range(len(visualizers)))
-            filters.append(f"[0:a]asplit={len(visualizers) + 1}{split_outputs}")
-            current_label = background_label
-            for idx, visualizer in enumerate(visualizers):
-                viz_label = f"viz{idx}"
-                next_label = f"v{idx}"
-                filters.append(self._visualizer_filter(f"av{idx}", viz_label, visualizer))
-                x, y = self._overlay_position(visualizer, width, height)
-                filters.append(
-                    f"[{current_label}][{viz_label}]overlay=x={x}:y={y}:format=auto:eof_action=pass[{next_label}]"
-                )
-                current_label = next_label
-            filters.append(f"[{current_label}]format={render_config.pix_fmt}[vout]")
-            audio_map = "[aout]"
-        else:
-            filters.append(f"[{background_label}]format={render_config.pix_fmt}[vout]")
-            audio_map = "0:a"
-
-        cmd.extend([
-            "-filter_complex",
-            ";".join(filters),
-            "-map",
-            "[vout]",
-            "-map",
-            audio_map,
-            "-t",
-            f"{duration:.3f}",
-            "-r",
-            str(fps),
-            *self._video_encoder_args(render_config),
-            "-pix_fmt",
-            render_config.pix_fmt,
-            "-c:a",
-            render_config.acodec,
-            "-b:a",
-            render_config.audio_bitrate,
-            "-shortest",
-            str(out_path),
-        ])
-
-        log(f"Rendering audio visualizer video: {out_path}", LogColor.MAGENTA, 1)
-        subprocess.run(cmd, check=True)
-        return c.build_media_Ref(
-            namespace=o.MediaNamespace.OUTPUTS,
-            path=out_path,
-            media_root=self.config.media_root,
-        )
+    def build_audio_video(self, request: d.AudioVideoRequest, progress=None) -> o.MediaRef:
+        from app.audio_spectrum import render_audio_video
+        return render_audio_video(self, request, progress)
 
     def build_video_from_ocrrun(
         self,

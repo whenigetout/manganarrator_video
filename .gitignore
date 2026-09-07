@@ -332,6 +332,7 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python,node,visualstudiocode
 
 # My local 'helper' files
+jobs/jobs.db*
 local_tmp/*
 output/*
 input/*

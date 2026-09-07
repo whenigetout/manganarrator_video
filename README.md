@@ -1,281 +1,137 @@
-# Manga Narrator Video Backend
+# MangaNarrator Video Backend
 
-FastAPI backend for rendering MangaNarrator video outputs with FFmpeg. The existing OCR-run video pipeline is still supported, and the backend now also includes an audio-first workflow for quickly generating YouTube-ready visualizer videos from a recorded audio file.
+FastAPI and FFmpeg video rendering for MangaNarrator. The existing OCR, segment, image and chapter endpoints remain available. Audio Studio adds an independent audio-to-video workflow.
 
-## Audio Visualizer Videos
+## Audio Studio: Start Here
 
-Use this feature when you have an audio file, such as a song recording or narration track, and want a configurable MP4 video with:
-
-- a generated abstract animated background, or one or more background video clips
-- reactive visualizers generated from the actual audio stream
-- circular, horizontal, or vertical visualizer layouts
-- configurable resolution, FPS, colors, size, position, opacity, and output filename
-
-The build runs through the existing job system. Start a build, poll `/video/status/{job_id}`, then use the returned `MediaRef` to find the generated MP4.
-
-### Output Location
-
-The backend reads `media_root` from `config.yaml`. In the current local config:
-
-```yaml
-media_root: "E:/pcc_shared/manga_narrator_runs"
-```
-
-Uploaded audio files are saved under:
-
-```text
-E:/pcc_shared/manga_narrator_runs/outputs/audio_video_uploads/
-```
-
-Generated videos are saved under:
-
-```text
-E:/pcc_shared/manga_narrator_runs/outputs/audio_video/{run_id}/{output_name}
-```
-
-If `run_id` is omitted, the backend creates one like `audio_video_abc123...`.
-
-### Start The Backend
-
-From the repo root, activate the environment and run the server as usual. For example:
+Activate your backend environment from this repository:
 
 ```powershell
-conda activate <your-env-name>
+conda activate manganarrator-video
 pip install -r requirements.txt
-uvicorn video_server:app --host 127.0.0.1 --port 8000 --reload
+pip install -r requirements-audio.txt
+uvicorn video_server:app --host 127.0.0.1 --port 8084
 ```
 
-`python-multipart` is required for the upload endpoint and is now included in `requirements.txt`.
+Open **http://127.0.0.1:8084/studio/**. No frontend build or npm installation is required. Use one backend worker; audio renders queue within that process.
 
+The environment also needs `mn_contracts` from the existing MangaNarrator setup, NumPy and OpenCV (the latter is already in requirements). FFmpeg and FFprobe must be on PATH. The original environment setup and `config.yaml` still apply.
 
-### Correct Curl Commands
+1. Choose your MP3 or WAV under **Audio file**. The original recording can be played in the audio player.
+2. Select an animated abstract background, or switch to **Video clips** and upload one or more clips.
+3. Configure a circular, horizontal or vertical spectrum. Add up to four independently configured layers.
+4. Click **Preview 5 seconds**. This renders the first five seconds through the same spectrum renderer as the final export, at up to 960x540. Geometry scales with the preview; final output uses the selected resolution.
+5. Watch progress under **Render jobs**. When complete, the preview loads into the video player; press Play.
+6. Adjust settings and preview again. Click **Render video** when satisfied.
+7. Use **View** or **Download** beside a completed job. Job history survives page refreshes. **Check status** also accepts a job ID from a curl/API request.
 
-For PowerShell, run this from the folder that contains `new_divide_1.mp3` and `audio_video_config.json`:
+Changing settings does not redraw an existing video. Generate another preview to see the new settings. The initial still is a sample, not a visualization of your newly selected recording.
+
+![Spectrum sample](frontend/preview.png)
+
+## What Changed In The Visualizer
+
+Circular output is now a radial frequency spectrum with separate rounded bars around a ring. It replaces the previous stereo vectorscope. Horizontal and vertical modes use the same measured frequency bands.
+
+A 4096-sample Hann window feeds NumPy's FFT at each video timestamp. Stereo power is averaged across channels, avoiding cancellation in opposite-phase recordings. Logarithmically spaced frequency bands drive each bar. Fast attack preserves transients; adjustable release smooths the motion. OpenCV draws the colored spectrum and glow. No prerecorded visualizer overlay is used.
+
+## Settings
+
+| Setting | Meaning |
+| --- | --- |
+| Resolution / FPS | Default 2560x1440 at 30 FPS. UI includes 720p, 1080p, 1440p, 4K and vertical 1080p. JSON accepts even dimensions from 128 to 3840, FPS 1-60. |
+| Encoder | NVIDIA H.264 NVENC or CPU H.264. The UI probes actual NVENC initialization and selects CPU when unavailable. |
+| Quality | Draft CQ/CRF 28, balanced 23, high quality 18. Lower values generally produce larger files. |
+| Layout / shape | Circular, horizontal or vertical; bars, connected lines or dots. |
+| Position / size | Nine anchor positions, width/height, and X/Y edge margins in output pixels. Oversized overlays are fitted to the frame. |
+| Bars | `frequency_bins`, 8-256 via JSON. This is the actual bar count. |
+| Sensitivity | `gain`, 0.1-10. Increase for quieter recordings. |
+| Response scale | `log` (default), `lin`, `sqrt`, `cbrt`. Log exposes quieter frequency bands. |
+| Radius | `radius`, 0.05-0.4 of the circular layer's shorter dimension. |
+| Thickness | `bar_width`, 0.1-0.95 of the space per bar. |
+| Glow | `glow`, 0-2. Zero disables the glow. |
+| Smoothing | `smoothing`, 0-0.98. Higher values give a slower release; zero follows each frame directly. |
+| Colors | One hex color or a palette separated by `|`, e.g. `#22d3ee|#ec4899|#facc15`. Colors interpolate across the bands. |
+| Opacity | `opacity`, 0-1. `background_opacity` darkens the rectangle behind a layer; zero leaves it transparent. |
+| Frequency range | JSON: `min_frequency` (20-1000 Hz), `max_frequency` (1001-20000 Hz). Defaults 40-16000 Hz. |
+| Background | `generated_style`: aurora, nebula, gradient or plasma; `color_a/b/c` and `blur` configure the animated color field. |
+| Clip speed | `background.playback_rate`, 0.05-8. Clips are normalized, played in order, looped and trimmed to the audio. Their sound is discarded. |
+| Audio bitrate | JSON: `render_config.audio_bitrate`, e.g. `192k` or `320k`. Output is AAC in an H.264/yuv420p MP4. |
+
+**Configuration JSON** can import, edit and export the complete request settings. `audio_ref` is supplied automatically by the upload. Saved configuration files are portable between curl, the studio and the JSON API.
+
+## GPU And Performance
+
+The studio defaults to NVENC preset `p1` for fast encoding, with `tune: hq`. GPU capability detection actually encodes a short test frame sequence. A requested GPU export reports an error if NVENC subsequently fails; it does not silently change encoders.
+
+FFT analysis and OpenCV drawing run on the CPU. NVENC handles final video encoding. Generated backgrounds are computed at low resolution and enlarged, avoiding the old full-resolution FFmpeg expression filter cost. More layers, glow, 4K and 60 FPS increase rendering work. Preview first, then export at the target resolution. CPU mode uses libx264's veryfast preset and the configured CRF quality.
+
+## Files And Job Status
+
+`media_root` comes from `config.yaml`. With the current local configuration:
+
+- Uploads: `E:/pcc_shared/manga_narrator_runs/outputs/audio_video_uploads/`
+- Videos: `E:/pcc_shared/manga_narrator_runs/outputs/audio_video/{run_id}/{output_name}`
+- Job database: `jobs/jobs.db`, ignored by Git.
+
+Each upload gets a unique run directory, even when you supply a run ID prefix. The completed job's `result.data` is the authoritative MediaRef. Preview videos are named `preview.mp4`; they are separate jobs from full exports. Intermediate PCM and normalized background files are removed after rendering. Uploaded source files and completed videos remain until you remove them.
+
+Progress is persisted with the processing stage. It reaches 100 only after the MP4 is finalized. The frontend polls every two seconds. Decode and background preparation show a stage; frame rendering shows percentage progress. Job errors are visible in the UI. After a backend restart, unfinished audio jobs are marked interrupted and must be submitted again.
+
+## API
+
+| Method / endpoint | Purpose |
+| --- | --- |
+| `POST /video/build/audio_upload` | Multipart `audio_file` and optional `config_json`; returns a job ID. |
+| `POST /video/build/audio` | JSON request with an existing `audio_ref`. |
+| `GET /video/status/{job_id}` | Status, result, error, progress and stage. |
+| `GET /video/audio/jobs` | Latest 30 audio jobs. Older jobs remain accessible by ID. |
+| `GET /video/audio/jobs/{job_id}/file` | Stream a completed MP4. Add `?download=true` to download. |
+| `POST /video/audio/background` | Multipart `video_file`; returns a MediaRef for `background.media_refs`. |
+| `GET /video/audio/capabilities` | Probe NVENC availability. |
+| `GET /studio/` | Portable frontend. |
+| `GET /docs` | Interactive FastAPI API documentation. |
+
+Audio uploads support MP3, WAV, FLAC, M4A, OGG and AAC, subject to installed FFmpeg decoders. Background uploads support MP4, MOV, MKV and WebM. Each upload is limited to 512 MB. Invalid JSON/settings and files without the requested stream produce HTTP 422 before a job is started.
+
+From your test-file directory, this works in PowerShell or Git Bash:
 
 ```powershell
-curl.exe -X POST "http://127.0.0.1:8084/video/build/audio_upload" `
-  -F "audio_file=@new_divide_1.mp3" `
-  -F "config_json=<audio_video_config.json"
+curl.exe -X POST "http://127.0.0.1:8084/video/build/audio_upload" -F "audio_file=@new_divide_1.mp3" -F "config_json=<audio_video_config.json"
 ```
 
-For Git Bash:
+Use a plain URL. The `@` uploads the audio file; `<` reads the JSON file. Do not escape underscores in field names.
 
-```bash
-curl.exe -X POST "http://127.0.0.1:8084/video/build/audio_upload" \
-  -F "audio_file=@new_divide_1.mp3" \
-  -F "config_json=<audio_video_config.json"
-```
-
-Important details:
-
-- Use the plain URL, not Markdown link text.
-- The file upload field must be `audio_file=@filename.mp3`; the `@` tells curl to upload file contents.
-- The config field must be named `config_json`, without a backslash.
-- MP3 and WAV inputs are supported as long as your installed FFmpeg can read them.
-- A 422 response usually means curl did not send the multipart fields with the names/types FastAPI expects.
-
-### Quick Test With An Uploaded Audio File
-
-Create a config file, for example `audio_video_config.json`:
+A minimal JSON request for an existing uploaded audio file:
 
 ```json
 {
-  "run_id": "my_song_test",
-  "output_name": "my_song_visualizer.mp4",
+  "audio_ref": {"namespace": "outputs", "path": "audio_video_uploads/recording.wav"},
+  "output_name": "recording.mp4",
   "render_config": {
-    "viewport_w": 2560,
-    "viewport_h": 1440,
-    "fps": 30,
-    "vcodec": "h264_nvenc",
-    "pix_fmt": "yuv420p",
-    "acodec": "aac",
-    "audio_bitrate": "192k",
-    "verbose": true
+    "viewport_w": 2560, "viewport_h": 1440, "fps": 30,
+    "vcodec": "h264_nvenc", "preset": "p1", "tune": "hq", "cq": 23
   },
-  "background": {
-    "mode": "generated",
-    "generated_style": "aurora",
-    "color_a": "#111827",
-    "color_b": "#ec4899",
-    "color_c": "#22d3ee",
-    "blur": 28,
-    "playback_rate": 1.0
-  },
-  "visualizers": [
-    {
-      "enabled": true,
-      "kind": "circular",
-      "position": "bottom_right",
-      "width": 460,
-      "height": 460,
-      "margin_x": 96,
-      "margin_y": 96,
-      "opacity": 0.95,
-      "colors": "0x22d3ee|0xec4899|0xfacc15|0xa78bfa",
-      "scale": "sqrt",
-      "frequency_bins": 96,
-      "gain": 1.0
-    },
-    {
-      "enabled": true,
-      "kind": "horizontal",
-      "position": "bottom",
-      "width": 1800,
-      "height": 220,
-      "margin_y": 72,
-      "opacity": 0.9,
-      "colors": "0x22d3ee|0xec4899|0xfacc15|0xa78bfa",
-      "mode": "bar",
-      "scale": "sqrt",
-      "frequency_bins": 128,
-      "gain": 1.0
-    }
-  ]
+  "visualizers": [{
+    "kind": "circular", "position": "center", "width": 850, "height": 850,
+    "frequency_bins": 64, "scale": "log",
+    "colors": "#22d3ee|#ec4899|#facc15"
+  }]
 }
 ```
 
-Start a build with PowerShell:
+## Portable Frontend
+
+Everything in `frontend/` is independent of the Python source and uses relative asset URLs. It has no build step, runtime CDN or framework dependency. Copy that directory into another frontend, import `studio.js`, and mount `<audio-video-studio api-base="http://127.0.0.1:8084">`. Styles are isolated in a Shadow DOM. The API client can also be imported separately into React, Vue or another framework.
+
+See [frontend integration guide](frontend/README.md) for standalone serving, component events and publishing updates.
+
+## Verification
 
 ```powershell
-curl.exe -X POST "http://127.0.0.1:8000/video/build/audio_upload" `
-  -F "audio_file=@C:\path\to\your_recording.wav" `
-  -F "config_json=<audio_video_config.json"
+python -m unittest discover -s tests -v
 ```
 
-The response contains a job id:
+Tests cover FFT frequency response, opposite-phase stereo, silence/release, all layouts and shapes, validation, MP3/WAV output and duration. Run the studio's five-second preview with a real recording to judge the visual response before exporting.
 
-```json
-{
-  "status": "processing",
-  "job_id": "..."
-}
-```
-
-Poll the job:
-
-```powershell
-curl.exe "http://127.0.0.1:8000/video/status/<job_id>"
-```
-
-When it is done, the response contains a `MediaRef` for the generated video. With the example config above, the file should be at:
-
-```text
-E:/pcc_shared/manga_narrator_runs/outputs/audio_video/my_song_test/my_song_visualizer.mp4
-```
-
-### Build From An Existing MediaRef
-
-If the audio file is already under `media_root`, you can call the JSON endpoint directly:
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/video/build/audio" `
-  -H "Content-Type: application/json" `
-  -d @request.json
-```
-
-Example `request.json`:
-
-```json
-{
-  "audio_ref": {
-    "namespace": "outputs",
-    "path": "audio_video_uploads/my_recording.wav"
-  },
-  "run_id": "existing_audio_test",
-  "output_name": "existing_audio_visualizer.mp4"
-}
-```
-
-### Use Background Video Clips
-
-Set `background.mode` to `media` and pass one or more `media_refs`. The backend repeats the clips as needed and trims the final video exactly to the audio duration.
-
-```json
-{
-  "background": {
-    "mode": "media",
-    "media_refs": [
-      {
-        "namespace": "outputs",
-        "path": "backgrounds/clip_01.mp4"
-      },
-      {
-        "namespace": "outputs",
-        "path": "backgrounds/clip_02.mp4"
-      }
-    ],
-    "playback_rate": 1.0
-  }
-}
-```
-
-The background video is scaled to fill the configured output resolution, cropped to fit, repeated if the audio is longer, and trimmed at the audio end.
-
-
-### Fast NVIDIA GPU Encoding
-
-For the fastest local renders on an NVIDIA GPU, use `h264_nvenc` with the fastest NVENC preset:
-
-```json
-{
-  "render_config": {
-    "viewport_w": 1280,
-    "viewport_h": 720,
-    "fps": 24,
-    "vcodec": "h264_nvenc",
-    "preset": "p1",
-    "tune": "ull",
-    "cq": 28,
-    "pix_fmt": "yuv420p",
-    "acodec": "aac",
-    "audio_bitrate": "192k"
-  }
-}
-```
-
-`p1` is the fastest NVENC preset. `ull` is ultra-low-latency tuning. Increasing `cq` is faster/smaller/lower quality; decreasing it is slower/larger/higher quality. A practical range is `23` to `30`.
-
-The reactive visualizer and generated abstract background filters still run through FFmpeg's filter graph, which can be CPU-heavy. NVENC moves final video encoding to the GPU, but extremely high generated-background resolutions such as `2560x1440` can still take time. For quick tests, use `1280x720`; for final uploads, switch back to `2560x1440` or your target resolution.
-
-### Customization Reference
-
-`render_config` controls the final video container and encoding:
-
-- `viewport_w`, `viewport_h`: output resolution. Default for this feature is `2560x1440`.
-- `fps`: output frame rate. Default is `30`.
-- `vcodec`: video encoder, for example `h264_nvenc` or `libx264`.
-- `pix_fmt`: usually `yuv420p` for upload-friendly MP4.
-- `acodec`: audio encoder, usually `aac`.
-- `audio_bitrate`: output audio bitrate, for example `192k` or `320k`.
-- `verbose`: whether FFmpeg logs are printed.
-
-`background` controls the base video:
-
-- `mode`: `generated` or `media`.
-- `generated_style`: `aurora`, `nebula`, `gradient`, or `plasma`.
-- `color_a`, `color_b`, `color_c`: hex colors used by generated backgrounds.
-- `blur`: blur amount for generated abstract motion.
-- `media_refs`: background clips when `mode` is `media`.
-- `playback_rate`: speed multiplier for background media.
-
-Each item in `visualizers` controls one reactive overlay:
-
-- `enabled`: turn the visualizer on or off.
-- `kind`: `circular`, `horizontal`, or `vertical`.
-- `position`: `center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`, `top`, `bottom`, `left`, or `right`.
-- `width`, `height`: visualizer size in pixels.
-- `margin_x`, `margin_y`: distance from the selected edge.
-- `opacity`: overlay opacity from `0.0` to `1.0`.
-- `colors`: FFmpeg color list, for example `0x22d3ee|0xec4899|0xfacc15`.
-- `mode`: bar style for horizontal/vertical visualizers: `bar`, `line`, or `dot`.
-- `scale`: amplitude scale: `lin`, `sqrt`, `cbrt`, or `log`.
-- `frequency_bins`: affects frequency resolution/window size.
-- `gain`: boosts or lowers visualizer reactivity.
-- `background_opacity`: keep at `0.0` for transparent visualizer backgrounds.
-
-### Notes
-
-- Visualizers are generated from the uploaded audio with FFmpeg audio analysis filters. They are not pre-rendered overlay clips.
-- The JSON endpoint expects the audio to already exist under `media_root` and be addressable by `MediaRef`.
-- The upload endpoint is the easiest path for local testing because it saves the audio and starts the build in one request.
-- If your machine does not have NVENC available, set `render_config.vcodec` to `libx264` for CPU encoding.
+The original MangaNarrator endpoints remain: `/video/preview/ocrrun`, `/video/preview/load`, `/video/preview/save`, `/video/build/ocrrun`, `/video/build/from_preview`, `/video/build/image` and `/video/build/segment`.

@@ -7,6 +7,7 @@ import json
 import uuid
 import app.models.domain as d
 from app.config import VideoConfig
+from app.audio_studio import install_studio, submit, upload_audio
 from app.chapter_video_builder import (
     ChapterVideoBuilder
 )
@@ -19,6 +20,7 @@ from jobs.jobs_db import (
     create_job,
     update_job,
     get_job,
+    mark_interrupted_audio_jobs,
 )
 from jobs.decorators import async_job
 from contextlib import asynccontextmanager
@@ -35,6 +37,7 @@ async def lifespan(app: FastAPI):
     """
     # print("Application startup: Initializing resources...")
     init_db()
+    mark_interrupted_audio_jobs()
     yield  # The application starts serving requests here
     # print("Application shutdown: Cleaning up resources...")
     # # Clean up resources
@@ -283,91 +286,20 @@ def build_segment_video(
         )
 
 
+install_studio(app, builder)
+
+
 @app.post("/video/build/audio", response_model=d.JobCreateResponse)
-@async_job(d.JobType.build_audio_video)
-def build_audio_video(
-    request: d.AudioVideoRequest = Body(...),
-):
-    """
-    Build a YouTube-ready video from one audio track.
+def build_audio_video(request: d.AudioVideoRequest = Body(...)):
+    return submit(builder, request)
 
-    The background can be FFmpeg-generated abstract motion or one or more
-    configured video clips that are repeated and trimmed to the audio length.
-    Visualizers are generated from the actual audio stream.
-    """
-
-    try:
-        return builder.build_audio_video(request)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Audio video build failed: {str(e)}",
-        )
 
 @app.post("/video/build/audio_upload", response_model=d.JobCreateResponse)
 def build_audio_video_from_upload(
     audio_file: UploadFile = File(...),
     config_json: Optional[str] = Form(default=None),
 ):
-    """
-    Upload an audio file and start an audio visualizer video build.
-
-    config_json is optional JSON matching AudioVideoRequest, except audio_ref is
-    supplied from the uploaded file.
-    """
-
-    try:
-        upload_root = Path(builder.config.media_root) / o.MediaNamespace.OUTPUTS.value / "audio_video_uploads"
-        c.ensure_dir(upload_root)
-
-        original_name = Path(audio_file.filename or "audio_file").name
-        safe_name = "".join(
-            ch if ch.isalnum() or ch in "._-" else "_"
-            for ch in original_name
-        ).strip("._") or "audio_file"
-        upload_path = upload_root / f"{uuid.uuid4().hex}_{safe_name}"
-
-        with upload_path.open("wb") as out_file:
-            audio_file.file.seek(0)
-            while True:
-                chunk = audio_file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                out_file.write(chunk)
-
-        audio_ref = c.build_media_Ref(
-            namespace=o.MediaNamespace.OUTPUTS,
-            path=upload_path,
-            media_root=builder.config.media_root,
-        )
-
-        payload = json.loads(config_json) if config_json else {}
-        payload["audio_ref"] = audio_ref.model_dump()
-        request = d.AudioVideoRequest.model_validate(payload)
-
-        job_id = create_job(d.JobType.build_audio_video)
-
-        def run():
-            try:
-                result = builder.build_audio_video(request)
-                update_job(job_id, d.JobStatus.done, result={
-                    "type": d.JobType.build_audio_video.value,
-                    "data": result,
-                })
-            except Exception as e:
-                update_job(job_id, d.JobStatus.failed, error=str(e))
-
-        threading.Thread(target=run).start()
-        return {
-            "status": d.JobStatus.processing,
-            "job_id": job_id,
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Audio upload video build failed: {str(e)}",
-        )
+    return upload_audio(builder, audio_file, config_json)
 
 @app.get("/video/status/{job_id}")
 def get_video_status(job_id: str):

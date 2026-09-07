@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pathlib import Path
 from typing import Literal, Any, Optional, List, Union
 from mn_contracts import ocr as o
@@ -52,18 +52,57 @@ class AudioVisualizerConfig(BaseModel):
     opacity: float = 0.95
     colors: str = "0x22d3ee|0xec4899|0xfacc15|0xa78bfa"
     mode: Literal["bar", "line", "dot"] = "bar"
-    scale: Literal["lin", "sqrt", "cbrt", "log"] = "sqrt"
-    frequency_bins: int = 96
-    gain: float = 1.0
+    scale: Literal["lin", "sqrt", "cbrt", "log"] = "log"
+    frequency_bins: int = Field(default=64, ge=8, le=256)
+    gain: float = Field(default=1.0, ge=0.1, le=10)
+    radius: float = Field(default=0.27, ge=0.05, le=0.4)
+    bar_width: float = Field(default=0.55, ge=0.1, le=0.95)
+    glow: float = Field(default=0.6, ge=0, le=2)
+    smoothing: float = Field(default=0.72, ge=0, le=0.98)
+    min_frequency: float = Field(default=40, ge=20, le=1000)
+    max_frequency: float = Field(default=16000, ge=1001, le=20000)
     background_opacity: float = 0.0
 
 class AudioVideoRequest(BaseModel):
     audio_ref: o.MediaRef
     run_id: Optional[str] = None
     output_name: str = "audio_visualizer_video.mp4"
-    render_config: RenderConfig = Field(default_factory=lambda: RenderConfig(viewport_w=2560, viewport_h=1440, fps=30))
+    render_config: RenderConfig = Field(default_factory=lambda: RenderConfig(viewport_w=2560, viewport_h=1440, fps=30, preset="p1"))
     background: AudioVideoBackgroundConfig = Field(default_factory=AudioVideoBackgroundConfig)
-    visualizers: List[AudioVisualizerConfig] = Field(default_factory=lambda: [AudioVisualizerConfig(), AudioVisualizerConfig(kind="horizontal", position="bottom", width=1800, height=220, margin_y=72, frequency_bins=128)])
+    visualizers: List[AudioVisualizerConfig] = Field(default_factory=lambda: [AudioVisualizerConfig(position="center", width=850, height=850)])
+    preview_seconds: Optional[float] = Field(default=None, ge=1, le=15)
+
+    @model_validator(mode="after")
+    def validate_audio_video(self):
+        import re
+        rc = self.render_config
+        if not (128 <= rc.viewport_w <= 3840 and 128 <= rc.viewport_h <= 3840):
+            raise ValueError("Resolution must be between 128 and 3840 pixels")
+        if rc.viewport_w % 2 or rc.viewport_h % 2 or not 1 <= rc.fps <= 60:
+            raise ValueError("Resolution must be even; FPS must be 1-60")
+        if rc.vcodec not in ("h264_nvenc", "libx264"):
+            raise ValueError("Audio video encoder must be h264_nvenc or libx264")
+        if self.run_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", self.run_id):
+            raise ValueError("run_id may contain only letters, digits, underscores and hyphens")
+        if len(self.visualizers) > 4:
+            raise ValueError("At most four visualizers are supported")
+        for viz in self.visualizers:
+            if not 32 <= viz.width <= 3840 or not 32 <= viz.height <= 3840:
+                raise ValueError("Visualizer size must be 32-3840 pixels")
+            if not 0 <= viz.opacity <= 1 or not 0 <= viz.background_opacity <= 1:
+                raise ValueError("Opacity must be between zero and one")
+            if viz.margin_x < 0 or viz.margin_y < 0:
+                raise ValueError("Margins must be nonnegative")
+            if not all(re.fullmatch(r"(?:#|0x)?[0-9a-fA-F]{6}", color) for color in viz.colors.split("|")):
+                raise ValueError("Colors must be six-digit hex values separated by |")
+        if self.background.mode == "media" and not self.background.media_refs:
+            raise ValueError("Choose at least one background video")
+        if not 0.05 <= self.background.playback_rate <= 8:
+            raise ValueError("Background playback rate must be 0.05-8")
+        for color in (self.background.color_a, self.background.color_b, self.background.color_c):
+            if not re.fullmatch(r"(?:#|0x)?[0-9a-fA-F]{6}", color):
+                raise ValueError("Background colors must be six-digit hex values")
+        return self
 
 class Size(BaseModel):
     w: int
@@ -195,6 +234,8 @@ class JobResponse(BaseModel):
     status: JobStatus
     result: Optional[JobResult] = None
     error: Optional[str] = None
+    progress: float = 0
+    stage: Optional[str] = None
 
 class JobCreateResponse(BaseModel):
     status: JobStatus  # always "processing"
