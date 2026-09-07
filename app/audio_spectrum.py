@@ -129,6 +129,32 @@ def generated_background(config, width, height, seconds):
     return cv2.resize(np.clip(frame, 0, 255).astype(np.uint8), (width, height), interpolation=cv2.INTER_LINEAR)
 
 
+def prepare_background(builder, request, folder, duration):
+    rc = request.render_config
+    clips = []
+    for index, ref in enumerate(request.background.media_refs):
+        clip = folder / f"background_{index}.mp4"
+        source = Path(ref.resolve(Path(builder.config.media_root)))
+        rate = request.background.playback_rate
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-an", "-t", str(duration),
+                        "-vf", f"setpts=(PTS-STARTPTS)/{rate},scale={rc.viewport_w}:{rc.viewport_h}:force_original_aspect_ratio=increase,crop={rc.viewport_w}:{rc.viewport_h},setsar=1,fps={rc.fps}",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(clip)],
+                       check=True, capture_output=True)
+        clips.append(clip)
+    manifest = folder / "clips.txt"
+    manifest.write_text("\n".join("file '" + p.as_posix().replace("'", "'\\''") + "'" for p in clips), encoding="utf-8")
+    return manifest
+
+
+def compose_frame(builder, request, seconds, levels, background_frame=None):
+    rc = request.render_config
+    frame = (generated_background(request.background, rc.viewport_w, rc.viewport_h, seconds)
+             if background_frame is None else background_frame.copy())
+    for viz, energy in zip((v for v in request.visualizers if v.enabled), levels):
+        draw_visualizer(frame, viz, energy, builder._overlay_position)
+    return frame
+
+
 def render_audio_video(builder, request, progress=None):
     from mn_contracts import common as common, ocr
     import uuid
@@ -157,17 +183,7 @@ def render_audio_video(builder, request, progress=None):
         try:
             if request.background.mode == "media":
                 progress(3, "Preparing background clips")
-                clips = []
-                for index, ref in enumerate(request.background.media_refs):
-                    clip = temp / f"background_{index}.mp4"
-                    source = Path(ref.resolve(Path(builder.config.media_root)))
-                    rate = request.background.playback_rate
-                    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-an", "-t", str(duration),
-                                    "-vf", f"setpts=(PTS-STARTPTS)/{rate},scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps}",
-                                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(clip)], check=True, capture_output=True)
-                    clips.append(clip)
-                manifest = temp / "clips.txt"
-                manifest.write_text("\n".join("file '" + p.as_posix().replace("'", "'\\''") + "'" for p in clips), encoding="utf-8")
+                manifest = prepare_background(builder, request, temp, duration)
                 decoder = subprocess.Popen(["ffmpeg", "-v", "error", "-stream_loop", "-1", "-f", "concat", "-safe", "0", "-i", str(manifest),
                                             "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             spectra = [(viz, Spectrum(viz, fps)) for viz in request.visualizers if viz.enabled]
@@ -187,9 +203,9 @@ def render_audio_video(builder, request, progress=None):
                                 raise RuntimeError("Background decoder ended unexpectedly")
                             frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3).copy()
                         else:
-                            frame = generated_background(request.background, width, height, index / fps)
-                        for viz, spectrum in spectra:
-                            draw_visualizer(frame, viz, spectrum.at(samples, index / fps), builder._overlay_position)
+                            frame = None
+                        levels = [spectrum.at(samples, index / fps) for viz, spectrum in spectra]
+                        frame = compose_frame(builder, request, index / fps, levels, frame)
                         encoder.stdin.write(frame.tobytes())
                         if index % max(1, fps // 2) == 0:
                             progress(5 + 90 * index / frames, "Rendering spectrum (" + rc.vcodec + ")")

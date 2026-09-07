@@ -1,72 +1,108 @@
 # Audio Video Studio
 
-Portable audio-to-video frontend for the [MangaNarrator video backend](https://github.com/whenigetout/manganarrator_video). Upload recorded audio, configure radial or linear spectrum layers, render a five-second preview, and track or download completed video jobs.
+React + Vite frontend for the [MangaNarrator video backend](https://github.com/whenigetout/manganarrator_video).
 
-![Radial spectrum sample](preview.png)
+Upload audio once, edit a live backend-rendered still, render a short video preview or full export, and find completed renders by recording filename. The live editor and rendered-video player are separate views.
 
-## Run
+## Run Locally
 
-This repository is the frontend only. It needs the updated MangaNarrator video backend running locally.
+The updated MangaNarrator video backend must be running on port 8084.
 
-When served by that backend, open http://127.0.0.1:8084/studio/.
-
-For a standalone checkout:
-
-```powershell
-python -m http.server 5173 --bind 127.0.0.1
+```sh
+npm ci
+npm run dev
 ```
 
-Open http://127.0.0.1:5173/, enter `http://127.0.0.1:8084` in the backend URL field, and click **Connect**. Serve the files over HTTP; ES modules do not work reliably from a file:// page.
+Open the URL printed by Vite (normally http://127.0.0.1:5173). The development proxy forwards `/video` to http://127.0.0.1:8084. For a different backend, enter its URL in the app and click the plug button, or set `VITE_API_BASE` in `.env.local`.
 
-Choose an MP3 or WAV, adjust spectrum settings, click **Preview 5 seconds**, then **Render video**. View progress and errors under **Render jobs**. Completed jobs include playback and download actions. The JSON editor supports preset import/export.
+For the backend's integrated /studio/ page:
 
-## Embed
-
-Copy these files into your host application's public assets directory:
-
-- `studio.js`
-- `studio.css`
-- `api.js`
-- `preview.png`
-
-Load and mount:
-
-```html
-<script type="module" src="/audio-studio/studio.js"></script>
-<audio-video-studio api-base="http://127.0.0.1:8084"></audio-video-studio>
+```sh
+npm ci
+npm run build
 ```
 
-Omit `api-base` when the backend is on the same origin. The component uses Shadow DOM for CSS isolation, relative module asset URLs and no build-time environment variables. The backend must allow requests from the frontend origin. The local MangaNarrator backend already enables CORS; use your deployment's auth/CORS policy when integrating remotely.
+The backend serves `dist/` at http://127.0.0.1:8084/studio/. Build output is not committed; rebuild after pulling frontend changes. Vite uses a relative asset base, so the build works under another URL prefix too.
 
-Events bubble across the shadow boundary:
+## Editor Workflow
+
+- Select MP3/WAV audio. The source uploads once and returns a reusable MediaRef.
+- The **Live editor** updates after edits, without creating a render job. Select **Frame time** to inspect another audio timestamp.
+- **Spectrum**, **Background** and **Export** tabs contain the controls. Resolution changes preserve layer dimensions in pixels, making the relative-size change visible.
+- Before selecting audio, a labeled demo audio frame is shown.
+- **Preview 5 seconds** renders a short video at the chosen export settings. **Rendered video** remains available while you edit the still.
+- **Render video** renders the full track.
+- Jobs show source filename, output filename, type, dimensions, FPS, layouts and creation time. Filter by filename or ID. UUIDs are still available under **Job ID**.
+- Configuration JSON supports import/export. Source media and completed videos live on the backend.
+
+The still uses the exact export compositor at full resolution, including audio analysis and smoothing history. It precedes video compression; the video preview shows the encoded result. Color/position changes reuse cached analysis. Requests debounce for 180 ms and stale responses cannot overwrite newer settings. New audio decoding and video-background preparation may take longer.
+
+## Embed In React Or Next.js
+
+Copy `src/` into your host application, retaining its module structure. The host needs `react`, `react-dom` and `lucide-react`. It supplies its own bundler; Vite is only needed to develop this standalone app.
+
+```jsx
+import { AudioVideoStudio } from './audio-studio';
+
+export default function AudioPage() {
+  return (
+    <AudioVideoStudio
+      apiBase="http://127.0.0.1:8084"
+      onRenderStarted={(job) => console.log(job.job_id)}
+      onRenderCompleted={(job) => console.log(job.result)}
+    />
+  );
+}
+```
+
+`src/index.js` exports the editor and imports scoped styles. The component uses a `"use client"` boundary for Next.js App Router. If supplying event callbacks from Next.js, make the containing component a client component too. For Next.js Pages Router, move the global CSS import to your `_app` entry if your setup requires it.
+
+Props:
+
+| Prop | Default | Purpose |
+| --- | --- | --- |
+| `apiBase` | empty string | Backend URL; empty means same-origin. |
+| `initialConfig` | built-in defaults | Initial configuration overrides. |
+| `onRenderStarted` | omitted | Receives the created job. |
+| `onRenderCompleted` | omitted | Receives the completed selected job. |
+
+The CSS selectors are scoped under `.audio-studio` so controls do not restyle the host app. For remote integration, use the host's authentication/CORS policy. The local backend already enables CORS.
+
+For a custom interface, import only the API client:
 
 ```javascript
-const studio = document.querySelector('audio-video-studio');
-studio.addEventListener('render-started', event => console.log(event.detail.job_id));
-studio.addEventListener('render-completed', event => console.log(event.detail.result));
-```
-
-To build a different interface, use just the API client:
-
-```javascript
-import { AudioVideoClient } from './api.js';
+import { AudioVideoClient } from './audio-studio/api';
 const client = new AudioVideoClient('http://127.0.0.1:8084');
-const job = await client.render(audioFile, configuration);
+const source = await client.uploadSource(file);
+const config = { ...settings, audio_ref: source.audio_ref, source_name: source.name };
+const frame = await client.frame(config, 2, false);
+const imageUrl = URL.createObjectURL(frame.blob); // revoke when replaced
+const job = await client.render(config);
 const status = await client.status(job.job_id);
-const recent = await client.jobs();
-const videoUrl = client.fileUrl(job.job_id);
 ```
 
-The backend retains source audio and rendered files. The frontend transfers files through multipart requests and displays the backend's result; it does not perform the final export in the browser.
+## Source Map
 
-## Backend Routes
+- `AudioVideoStudio.jsx`: editor state, uploads, preview modes and render lifecycle.
+- `SettingsPanel.jsx`: spectrum, background and export controls.
+- `JobList.jsx`: readable/searchable render history and downloads.
+- `useLiveFrame.js`: debouncing, cancellation and stale-response protection.
+- `api.js`: backend client, independent of React.
+- `config.js`: defaults and request construction.
+- `studio.css`: scoped styling.
 
-`POST /video/build/audio_upload`, `GET /video/status/{id}`, `GET /video/audio/jobs`, `GET /video/audio/jobs/{id}/file`, `POST /video/audio/background`, and `GET /video/audio/capabilities`.
+## Checks
 
-The rendering engine and Python regression tests live in the backend repository. This frontend is also maintained there under `frontend/`. Publish frontend updates from that repository with:
+```sh
+npm run build
+npm run test:e2e
+npm run format
+```
 
-```powershell
+Browser tests use a locally running backend and installed Chrome. Set `STUDIO_URL` to change the page URL or `PLAYWRIGHT_CHANNEL` to another installed Playwright browser channel. Test recordings are generated in memory.
+
+The Python renderer tests and complete configuration guide live in the backend repository. This frontend is maintained there under `frontend/`; publish frontend updates from the backend checkout with:
+
+```sh
 git subtree push --prefix=frontend studio-frontend main
 ```
-
-The host backend's README documents output locations, configuration fields, FFT processing and GPU encoding.

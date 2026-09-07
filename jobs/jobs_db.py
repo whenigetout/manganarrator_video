@@ -34,22 +34,23 @@ def init_db():
         """)
 
         columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
-        for name, definition in (("progress", "REAL DEFAULT 0"), ("stage", "TEXT"), ("job_type", "TEXT")):
+        for name, definition in (("progress", "REAL DEFAULT 0"), ("stage", "TEXT"), ("job_type", "TEXT"), ("metadata", "TEXT")):
             if name not in columns:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
 
-def create_job(job_type: JobType = JobType.build_image):
+def create_job(job_type: JobType = JobType.build_image, metadata=None):
     job_id = str(uuid.uuid4())
     with get_conn() as conn:
         conn.execute("""
-        INSERT INTO jobs (job_id, status, created_at, job_type, stage)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO jobs (job_id, status, created_at, job_type, stage, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)
         """, (
             job_id,
             JobStatus.processing.value,
             datetime.utcnow().isoformat(),
             job_type.value,
-            "Queued"
+            "Queued",
+            json.dumps(metadata or {})
         ))
     return job_id
 
@@ -77,7 +78,7 @@ def update_job(job_id: str, status: JobStatus, result=None, error: str | None = 
 def get_job(job_id: str) -> Optional[JobResponse]:
     with get_conn() as conn:
         row = conn.execute("""
-        SELECT job_id, status, result, error, progress, stage
+        SELECT job_id, status, result, error, progress, stage, created_at, metadata
         FROM jobs WHERE job_id = ?
         """, (job_id,)).fetchone()
 
@@ -90,7 +91,9 @@ def get_job(job_id: str) -> Optional[JobResponse]:
         result=JobResult(**json.loads(row[2])) if row[2] else None,
         error=row[3],
         progress=100 if row[1] == "done" else (row[4] or 0),
-        stage=row[5]
+        stage=row[5],
+        created_at=row[6],
+        metadata=json.loads(row[7]) if row[7] else {}
     )
 
 

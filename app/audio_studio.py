@@ -7,9 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from mn_contracts import common, ocr
 
 from app.models import domain as d
@@ -17,6 +17,13 @@ from jobs.jobs_db import create_job, get_job, list_audio_jobs, update_job, updat
 
 
 RENDER_LOCK = threading.Lock()
+FRAME_LOCK = threading.Semaphore(2)
+
+
+class FrameRequest(BaseModel):
+    config: d.AudioVideoRequest
+    seconds: float = Field(default=2, ge=0, le=7200)
+    demo: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -30,7 +37,14 @@ def encoder_capabilities():
 
 
 def submit(builder, request):
-    job_id = create_job(d.JobType.build_audio_video)
+    rc = request.render_config
+    job_id = create_job(d.JobType.build_audio_video, metadata={
+        "source_name": request.source_name or Path(request.audio_ref.path).name,
+        "output_name": builder._safe_output_name(request.output_name),
+        "kind": "preview" if request.preview_seconds else "video",
+        "width": rc.viewport_w, "height": rc.viewport_h, "fps": rc.fps,
+        "layouts": [v.kind for v in request.visualizers if v.enabled],
+    })
 
     def run():
         with RENDER_LOCK:
@@ -84,6 +98,7 @@ def upload_audio(builder, audio_file, config_json):
         request = d.AudioVideoRequest.model_validate(payload)
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    request.source_name = Path(audio_file.filename or "Audio upload").name[:255]
     request.audio_ref = save_upload(builder, audio_file, "audio")
     # Each upload gets its own directory; repeated clicks cannot overwrite another job.
     request.run_id = f"{request.run_id or 'studio'}_{uuid.uuid4().hex[:8]}"
@@ -100,6 +115,24 @@ def install_studio(app, builder):
     @router.get("/jobs")
     def jobs():
         return list_audio_jobs()
+
+    @router.post("/source")
+    def source(audio_file: UploadFile = File(...)):
+        from app.audio_frame import cached_audio
+        name = Path(audio_file.filename or "Audio upload").name[:255]
+        ref = save_upload(builder, audio_file, "audio")
+        pcm, duration = cached_audio(builder, ref)
+        return {"audio_ref": ref, "name": name, "duration": duration}
+
+    @router.post("/frame")
+    def frame(request: FrameRequest):
+        from app.audio_frame import preview_png
+        try:
+            with FRAME_LOCK:
+                png, timestamp = preview_png(builder, request.config, request.seconds, request.demo)
+            return Response(png, media_type="image/png", headers={"Cache-Control": "no-store", "X-Frame-Time": str(timestamp)})
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @router.post("/background")
     def background(video_file: UploadFile = File(...)):
@@ -118,4 +151,4 @@ def install_studio(app, builder):
         return FileResponse(path, media_type="video/mp4", filename=path.name if download else None)
 
     app.include_router(router)
-    app.mount("/studio", StaticFiles(directory=Path(__file__).resolve().parent.parent / "frontend", html=True), name="audio-studio")
+    app.mount("/studio", StaticFiles(directory=Path(__file__).resolve().parent.parent / "frontend" / "dist", html=True, check_dir=False), name="audio-studio")

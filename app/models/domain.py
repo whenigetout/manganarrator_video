@@ -65,6 +65,7 @@ class AudioVisualizerConfig(BaseModel):
 
 class AudioVideoRequest(BaseModel):
     audio_ref: o.MediaRef
+    source_name: Optional[str] = Field(default=None, max_length=255)
     run_id: Optional[str] = None
     output_name: str = "audio_visualizer_video.mp4"
     render_config: RenderConfig = Field(default_factory=lambda: RenderConfig(viewport_w=2560, viewport_h=1440, fps=30, preset="p1"))
@@ -236,6 +237,8 @@ class JobResponse(BaseModel):
     error: Optional[str] = None
     progress: float = 0
     stage: Optional[str] = None
+    created_at: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
 
 class JobCreateResponse(BaseModel):
     status: JobStatus  # always "processing"

@@ -21,7 +21,10 @@ class AudioJobTests(unittest.TestCase):
             db.init_db()
             self.assertEqual(db.get_job("old").result.type, JobType.build_image)
             self.assertEqual(db.get_job("old").progress, 100)
-            audio = db.create_job(JobType.build_audio_video)
+            metadata = {"source_name": "My singing.mp3", "output_name": "song.mp4", "width": 2560, "height": 1440, "fps": 30, "kind": "video"}
+            audio = db.create_job(JobType.build_audio_video, metadata)
+            self.assertEqual(db.get_job(audio).metadata, metadata)
+            self.assertIsNotNone(db.get_job(audio).created_at)
             manga = db.create_job(JobType.build_image)
             db.update_progress(audio, 42, "Rendering spectrum")
             self.assertEqual(db.get_job(audio).progress, 42)
