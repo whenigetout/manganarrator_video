@@ -1,5 +1,6 @@
 """Google grants bound to verified channel identities, not account display names."""
 import json
+import logging
 import secrets
 import threading
 import uuid
@@ -11,6 +12,35 @@ from google.auth.exceptions import RefreshError, TransportError
 from .models import PublishingError
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
+logger = logging.getLogger("uvicorn.error.youtube_oauth")
+
+
+def response_diagnostic(response):
+    """Allowlist response structure only; never dump bodies or request headers."""
+    result = {"status": response.status_code}
+    try:
+        body = response.json()
+    except ValueError:
+        return {**result, "json_object": False}
+    if not isinstance(body, dict):
+        return {**result, "json_object": False}
+    result.update(json_object=True, channel_list_response=body.get("kind") == "youtube#channelListResponse",
+                  items_present="items" in body, has_next_page=bool(body.get("nextPageToken")))
+    items = body.get("items")
+    result["item_count"] = len(items) if isinstance(items, list) else None
+    page = body.get("pageInfo")
+    if isinstance(page, dict):
+        result["pageInfo"] = {key: value for key, value in page.items()
+                              if key in {"totalResults", "resultsPerPage"} and type(value) is int}
+    error = body.get("error")
+    if isinstance(error, dict):
+        result["error_code"] = error.get("code") if type(error.get("code")) is int else None
+        known = {"authError", "insufficientPermissions", "accessNotConfigured", "quotaExceeded", "channelForbidden"}
+        errors = error.get("errors", [])
+        if isinstance(errors, list):
+            result["error_reasons"] = [entry.get("reason") if entry.get("reason") in known else "other"
+                                       for entry in errors if isinstance(entry, dict)]
+    return result
 
 
 class OAuth:
@@ -48,16 +78,33 @@ class OAuth:
             flow.fetch_token(code=code, timeout=30)
         except Exception as exc:
             raise ValueError("Google authorization failed. Connect again and grant both requested permissions.") from exc
-        if not flow.credentials.refresh_token:
+        credentials = flow.credentials
+        diagnostic_id = uuid.uuid4().hex[:12]
+        granted = credentials.granted_scopes
+        if isinstance(granted, str):
+            granted = granted.split()
+        granted_known = isinstance(granted, (list, tuple, set))
+        token_response = flow.oauth2session.token
+        logger.info("YouTube OAuth exchange %s", json.dumps({
+            "diagnostic_id": diagnostic_id, "profile_id": data["profile_id"],
+            "source": "callback_code_exchange", "requested_scopes": SCOPES,
+            "granted_scopes_reported": granted_known,
+            "requested_scopes_granted": {scope: scope in granted if granted_known else None for scope in SCOPES},
+            "access_token_present": bool(credentials.token),
+            "refresh_token_present": bool(credentials.refresh_token),
+            "token_matches_exchange": credentials.token == token_response.get("access_token") if isinstance(token_response, dict) else None,
+            "state_profile_bound": True, "pkce_present": bool(verifier),
+        }))
+        if not credentials.refresh_token:
             raise ValueError("Google did not issue offline access. Reconnect and grant access.")
-        channel = self.channel(flow.credentials.token)
+        channel = self.channel(credentials.token, diagnostic_id=diagnostic_id)
         with self.lock:
             profile = self.store.get("profiles", data["profile_id"])
             expected = profile.get("channel_id") or data.get("channel_id")
             if expected and expected != channel["id"]:
                 raise ValueError("Wrong YouTube channel. This profile is already bound to a different channel.")
             credential_id = profile.get("credential_id") or uuid.uuid4().hex
-            self.settings.set_secret("grant:" + credential_id, flow.credentials.to_json())
+            self.settings.set_secret("grant:" + credential_id, credentials.to_json())
             custom_url = channel["snippet"].get("customUrl", "")
             # Legacy custom URLs are not necessarily handles; do not invent one.
             handle = custom_url if custom_url.startswith("@") else None
@@ -95,12 +142,19 @@ class OAuth:
                 self.store.put("profiles", {**current, "connection_status": status}, current["id"])
 
     @staticmethod
-    def channel(token):
+    def channel(token, diagnostic_id=None):
         try:
             response = httpx.get("https://www.googleapis.com/youtube/v3/channels", params={"part": "id,snippet", "mine": "true"},
                                  headers={"Authorization": "Bearer " + token}, timeout=30)
         except httpx.TransportError as exc:
             raise PublishingError("Cannot verify the channel. Retrying.", "retry_wait") from exc
+        logger.info("YouTube channels.list %s", json.dumps({
+            "diagnostic_id": diagnostic_id, "method": "GET",
+            "endpoint": "https://www.googleapis.com/youtube/v3/channels",
+            "params": {"part": "id,snippet", "mine": "true"},
+            "authorization": "Bearer user OAuth access token", "api_key_used": False,
+            "response": response_diagnostic(response),
+        }))
         if response.status_code == 429 or response.status_code >= 500:
             raise PublishingError("YouTube channel verification is temporarily unavailable. Retrying.", "retry_wait")
         if response.status_code != 200:

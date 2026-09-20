@@ -6,7 +6,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from google.auth.exceptions import RefreshError
-from app.publishing.oauth import OAuth
+from app.publishing.oauth import OAuth, SCOPES, response_diagnostic
 from app.publishing.models import PublishingError
 from app.publishing.youtube import YouTube
 from app.publishing.api import valid_session, session_token, public_profile, public_run, install_publishing
@@ -151,6 +151,45 @@ class OAuthTests(unittest.TestCase):
         self.assertIn("0 channels &lt;test&gt;", response.text)
         self.assertIn("Do not refresh", response.text)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_diagnostics_trace_exchange_without_exposing_secrets(self):
+        flow = Mock()
+        flow.credentials.token = "SECRET_ACCESS"
+        flow.credentials.refresh_token = "SECRET_REFRESH"
+        flow.credentials.granted_scopes = " ".join(SCOPES)
+        flow.oauth2session.token = {"access_token": "SECRET_ACCESS", "refresh_token": "SECRET_REFRESH"}
+        self.f.store.save_state("SECRET_STATE", {"profile_id": self.f.profile["id"], "verifier": "pkce"})
+        self.f.settings.set_secret("pkce", "SECRET_PKCE")
+        body = {"kind": "youtube#channelListResponse", "items": [],
+                "pageInfo": {"totalResults": 0, "resultsPerPage": 5, "extra": "SECRET_BODY"},
+                "unexpected": "SECRET_BODY"}
+        with patch.object(self.f.settings, "oauth_config", create=True, return_value={"client_secret": "SECRET_CLIENT"}), \
+             patch("app.publishing.oauth.Flow.from_client_config", return_value=flow), \
+             patch("app.publishing.oauth.httpx.get", return_value=httpx.Response(200, json=body)) as get, \
+             self.assertLogs("uvicorn.error.youtube_oauth", level="INFO") as logs:
+            with self.assertRaises(PublishingError):
+                self.oauth.finish("SECRET_STATE", "SECRET_CODE")
+        self.assertEqual(get.call_args.kwargs["headers"], {"Authorization": "Bearer SECRET_ACCESS"})
+        self.assertNotIn("SECRET_", "\n".join(logs.output))
+        exchange = json.loads(logs.records[0].getMessage().split("YouTube OAuth exchange ")[1])
+        discovery = json.loads(logs.records[1].getMessage().split("YouTube channels.list ")[1])
+        self.assertEqual(exchange["diagnostic_id"], discovery["diagnostic_id"])
+        self.assertEqual(exchange["profile_id"], self.f.profile["id"])
+        self.assertTrue(exchange["token_matches_exchange"])
+        self.assertTrue(all(exchange["requested_scopes_granted"].values()))
+        self.assertEqual(discovery["response"]["status"], 200)
+        self.assertEqual(discovery["response"]["item_count"], 0)
+        self.assertEqual(discovery["response"]["pageInfo"]["totalResults"], 0)
+
+    def test_response_diagnostics_never_dump_errors_or_non_json_bodies(self):
+        for response in (
+            httpx.Response(403, json={"error": {"code": 403, "message": "SECRET_MESSAGE", "errors": [{"reason": "SECRET_REASON"}]}}),
+            httpx.Response(502, text="SECRET_HTML"),
+            httpx.Response(200, json=["SECRET_ARRAY"]),
+        ):
+            result = response_diagnostic(response)
+            self.assertEqual(result["status"], response.status_code)
+            self.assertNotIn("SECRET_", json.dumps(result))
 
     def test_upload_transport_uses_each_selected_profiles_grant(self):
         self.f.settings.set_secret("grant:a", json.dumps({"token": "access-a"}))
