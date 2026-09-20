@@ -347,6 +347,7 @@ input/*
 !local_tmp/.gitkeep
 !output/.gitkeep
 !input/.gitkeep
+!secrets/.gitkeep
 
 __pycache__/
 *.pyc
