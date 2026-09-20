@@ -155,6 +155,12 @@ For frontend development, run `npm run dev` under `frontend/`; Vite proxies `/vi
 
 ## Verification
 
+### Channel connection troubleshooting
+
+If Google consent completes but the callback reports **0 channels**, sign-in succeeded but `channels.list(mine=true)` did not return a YouTube channel for that authorization. This is not evidence that you selected multiple channels. Start a fresh Connect/Reconnect attempt from Channel profiles; do not reload the callback URL, because its state and authorization code are single-use. Select the account that owns the channel and the actual channel/Brand Account when Google offers that choice, and grant both requested permissions. The app now explicitly requests account selection as well as consent. Studio access alone may not provide API access for that identity.
+
+If the callback reports **multiple channels**, the app will not guess an upload destination. Reconnect with the specific channel identity. Neither failure replaces a profile's existing stored grant. The global Google client JSON does not need to be imported again. If a fresh attempt still fails, report the callback's error text, not its URL (which contains authorization parameters).
+
 ```powershell
 conda activate manganarrator-video
 pip install -r requirements-publishing.txt

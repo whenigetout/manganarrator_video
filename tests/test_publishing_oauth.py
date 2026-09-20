@@ -3,11 +3,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch, Mock
 import httpx
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from google.auth.exceptions import RefreshError
 from app.publishing.oauth import OAuth
 from app.publishing.models import PublishingError
 from app.publishing.youtube import YouTube
-from app.publishing.api import valid_session, session_token, public_profile, public_run
+from app.publishing.api import valid_session, session_token, public_profile, public_run, install_publishing
 from support_publishing import Fixture
 
 
@@ -68,6 +70,8 @@ class OAuthTests(unittest.TestCase):
             self.oauth.begin(second["id"])
             b = self.oauth.finish("state-stories", "code-stories")
         self.assertTrue(all(call.args[0] == client_config for call in factory.call_args_list))
+        music.authorization_url.assert_called_once_with(
+            access_type="offline", prompt="select_account consent", include_granted_scopes="true")
         self.assertNotEqual(a["credential_id"], b["credential_id"])
         self.assertEqual(a["channel_handle"], "@music")
         self.assertEqual(b["channel_id"], "UC_stories")
@@ -107,6 +111,46 @@ class OAuthTests(unittest.TestCase):
         profile = public_profile(self.f.store.get("profiles", self.f.profile["id"]), self.f.settings)
         self.assertEqual(profile["connection_status"], "needs_reauth")
         self.assertFalse(profile["connected"])
+
+    def test_channel_discovery_distinguishes_empty_and_ambiguous_results(self):
+        channel = {"id": "UC_test", "snippet": {"title": "Music"}}
+        for payload, message in (
+            ({"items": []}, "0 channels"),
+            ({}, "0 channels"),
+            ({"items": [channel, {"id": "UC_other"}]}, "multiple channels"),
+            ({"items": [channel], "nextPageToken": "more"}, "multiple channels"),
+        ):
+            with self.subTest(payload=payload), patch("app.publishing.oauth.httpx.get", return_value=httpx.Response(200, json=payload)):
+                with self.assertRaises(PublishingError) as caught:
+                    self.oauth.channel("secret-access-token")
+                self.assertIn(message, str(caught.exception))
+                self.assertNotIn("secret-access-token", str(caught.exception))
+                self.assertEqual(caught.exception.kind, "needs_reauth")
+
+    def test_failed_discovery_preserves_existing_grant(self):
+        flow = Mock()
+        flow.credentials.refresh_token = "new-refresh"
+        flow.credentials.token = "new-access"
+        self.f.store.save_state("empty-channel", {"profile_id": self.f.profile["id"], "verifier": "pkce"})
+        self.f.settings.set_secret("pkce", "verifier")
+        with patch.object(self.f.settings, "oauth_config", create=True, return_value={}), \
+             patch("app.publishing.oauth.Flow.from_client_config", return_value=flow), \
+             patch("app.publishing.oauth.httpx.get", return_value=httpx.Response(200, json={"items": []})):
+            with self.assertRaises(PublishingError):
+                self.oauth.finish("empty-channel", "code")
+        self.assertEqual(self.f.settings.get_secret("grant:grant1"), "fake")
+        self.assertIsNone(self.f.settings.get_secret("pkce"))
+
+    def test_callback_displays_escaped_recovery_guidance(self):
+        app = FastAPI()
+        install_publishing(app, self.f.builder, self.f.settings)
+        with TestClient(app) as client, patch.object(OAuth, "finish", side_effect=PublishingError("0 channels <test>", "needs_reauth")):
+            response = client.get("/video/publishing/oauth/callback", params={"state": "fake", "code": "fake"})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn("0 channels &lt;test&gt;", response.text)
+        self.assertIn("Do not refresh", response.text)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
 
     def test_upload_transport_uses_each_selected_profiles_grant(self):
         self.f.settings.set_secret("grant:a", json.dumps({"token": "access-a"}))

@@ -30,7 +30,7 @@ class OAuth:
         profile = self.store.get("profiles", profile_id)
         flow = Flow.from_client_config(self.settings.oauth_config(), scopes=SCOPES,
                                       redirect_uri=self.settings.redirect_uri, autogenerate_code_verifier=True)
-        url, state = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true")
+        url, state = flow.authorization_url(access_type="offline", prompt="select_account consent", include_granted_scopes="true")
         verifier_key = "pkce:" + secrets.token_hex(16)
         self.settings.set_secret(verifier_key, flow.code_verifier)
         expired = self.store.save_state(state, {"profile_id": profile_id, "channel_id": profile.get("channel_id"), "verifier": verifier_key})
@@ -105,9 +105,21 @@ class OAuth:
             raise PublishingError("YouTube channel verification is temporarily unavailable. Retrying.", "retry_wait")
         if response.status_code != 200:
             raise PublishingError("Cannot verify channel ownership. Reconnect with YouTube read and upload access.", "needs_reauth")
-        items = response.json().get("items", [])
-        if len(items) != 1:
-            raise PublishingError("Google must authorize exactly one YouTube channel. Reconnect and choose that channel.", "needs_reauth")
+        payload = response.json()
+        items = payload.get("items", [])
+        if not items:
+            raise PublishingError(
+                "Google sign-in succeeded, but YouTube returned no channel for this authorization "
+                "(channels.list mine=true: 0 channels). Return to Audio Studio and connect again. "
+                "Choose the Google account that owns the channel, then the actual YouTube channel "
+                "or Brand Account if Google offers that choice. Grant both requested permissions. "
+                "Being able to manage a channel in YouTube Studio does not necessarily give this "
+                "Google identity API access to that channel. No new credentials were saved.", "needs_reauth")
+        if len(items) != 1 or payload.get("nextPageToken"):
+            raise PublishingError(
+                "YouTube returned multiple channels for this authorization. Uploads are blocked "
+                "because the destination is ambiguous. Return to Audio Studio and reconnect with "
+                "the specific channel identity. No new credentials were saved.", "needs_reauth")
         return items[0]
 
     def verify(self, profile):

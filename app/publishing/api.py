@@ -1,5 +1,6 @@
 """Owner-authenticated publishing API, independent of legacy MangaNarrator routes."""
 import hashlib
+from html import escape
 import hmac
 import logging
 import time
@@ -210,7 +211,13 @@ def install_publishing(app, builder, settings=None):
             data = store.consume_state(state)
             settings.delete_secret(data["verifier"])
             return HTMLResponse("<h1>Channel not connected</h1><p>Authorization was declined. Return to the studio and try again.</p>", status_code=400)
-        oauth.finish(state, code)
+        try:
+            oauth.finish(state, code)
+        except (PublishingError, ValueError) as exc:
+            return HTMLResponse(
+                "<h1>Channel not connected</h1><p>" + escape(str(exc)) +
+                "</p><p>Close this tab and start a new connection from Channel profiles. "
+                "Do not refresh this callback page.</p>", status_code=422)
         return HTMLResponse("<h1>Channel connected</h1><p>You can close this tab and return to Audio Studio.</p>")
 
     @router.post("/runs")
