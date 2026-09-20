@@ -6,6 +6,10 @@ FastAPI and FFmpeg video rendering for MangaNarrator. The existing OCR, segment,
 
 Double-click **`Launch Studio.cmd`** in this repository. It finds the existing `manganarrator-video` Conda environment, installs missing optional publishing/frontend dependencies, builds the React frontend when needed, and launches both through one local server. Keep its window open. No separate frontend terminal is needed.
 
+That window **is** the studio console: the launcher prints its steps, then the live Uvicorn and application log, including the exact `http://127.0.0.1:<port>/studio/` URL. The same output is appended to `local_tmp/logs/studio-<date>.log`, so you can still read it after the window closes. Starting the launcher again while a studio is already answering reuses that server, prints its port and log path, and waits for Enter before closing.
+
+**Want separate backend and frontend consoles?** Double-click **`Launch Studio Dev.cmd`**. It opens two titled windows - *Backend (API, publishing, built frontend)* and *Frontend (Vite dev server, port 5173)* - and leaves each one showing its own live log, with hot reload for frontend edits. The backend window owns the API and publishing worker; the dev launcher opens the Vite URL in your browser.
+
 **Everyday workflow:** upload recording -> choose saved channel -> **Prepare for YouTube** -> review -> **Approve & upload**. The channel preset is applied automatically. Rendering and metadata generation run without another prompt; uploading never starts before your review. Private is the default; profiles can default to Unlisted, but never Public.
 
 - **[Quick reference](docs/QUICK_REFERENCE.md):** the shortest path from recording to channel.

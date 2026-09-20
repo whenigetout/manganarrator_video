@@ -6,6 +6,8 @@
 2. Keep the launcher window open. It opens the React studio in your browser.
 3. To reopen/unlock publishing later, double-click the launcher again. It reuses its running server.
 
+That launcher window is the studio console: it prints the URL, the launcher steps and the live server log. The same lines are appended to `local_tmp/logs/studio-<date>.log` if you need them after closing the window. For two side-by-side consoles - backend on one, Vite dev server with hot reload on the other - double-click **Launch Studio Dev.cmd** instead.
+
 The existing Conda backend environment, FFmpeg/FFprobe, and Node.js are prerequisites. No Conda activation or curl is needed for normal use. See [setup](PUBLISHING_GUIDE.md) for a new machine.
 
 ## One-Time YouTube Setup

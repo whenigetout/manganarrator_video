@@ -6,6 +6,8 @@ Upload audio once, edit a live backend-rendered still, render a short video prev
 
 The optional **YouTube publishing** panel adds saved channel profiles, metadata generation, review, resumable uploads and progress. When using the full backend repository, double-click **Launch Studio.cmd** to start backend and built frontend together. One-time Google/LLM configuration is covered in the backend's `docs/PUBLISHING_GUIDE.md`; daily instructions are in `docs/QUICK_REFERENCE.md`.
 
+`Launch Studio.cmd` runs one process (FastAPI serving the API plus this app's production build) and its window is the console; the same output is written to `local_tmp/logs/studio-<date>.log`. To see backend and frontend consoles side by side instead, double-click **`Launch Studio Dev.cmd`** in the backend repository: it opens a backend window and a Vite dev window on http://127.0.0.1:5173/.
+
 ## Run Locally
 
 The updated MangaNarrator video backend must be running on port 8084.

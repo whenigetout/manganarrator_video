@@ -12,6 +12,19 @@ The frontend is React + Vite, not Next.js. The launcher serves its production bu
 
 Double-click `Launch Studio.cmd`. The wrapper applies PowerShell execution-policy bypass to that invocation only; it does not change your machine's policy. The launcher prefers `STUDIO_PYTHON`, then the standard Miniconda/Anaconda `manganarrator-video` environment, then the active Conda prefix. It checks the base backend, FFmpeg, FFprobe and Node/npm; installs missing optional dependencies; runs `npm ci` when the lockfile changes; and builds the React app when source/build inputs are newer.
 
+### Consoles and logs
+
+There is no separate frontend server in normal use: FastAPI serves the API and the built React app on `/studio/`, so `Launch Studio.cmd` runs everything in the one console window it opens. That window is the backend console - it shows the launcher steps, the studio URL and the live Uvicorn/application log - and Ctrl+C in it stops the studio. The same output is appended to `local_tmp/logs/studio-<YYYYMMDD>.log` (ANSI-free, timestamped), so logs survive closing the window.
+
+If the launcher finds a studio already answering on its remembered port it reuses it: it prints the port, the URL and the log path, then waits for Enter before closing, so the information stays readable instead of flashing past.
+
+For two consoles at once, double-click `Launch Studio Dev.cmd`. It opens:
+
+1. **Backend (API, publishing, built frontend)** - the same launcher with request logging enabled, in its own window.
+2. **Frontend (Vite dev server, port 5173)** - `npm run dev` with hot reload, in its own window.
+
+The dev launcher waits for both, then opens `http://127.0.0.1:5173/` (unlocked with the same publishing token the normal launcher uses). The Vite proxy forwards `/video` to the backend, so both windows show live logs. Close both windows to stop the studio.
+
 Prerequisites for a new machine:
 
 1. Follow the original repository setup, including `mn_contracts`, `config.yaml`, and a valid `media_root`.
@@ -23,7 +36,7 @@ The default URL is `http://127.0.0.1:8084/studio/`. If that port belongs to anot
 
 Keep the launcher window open; Ctrl+C gracefully stops the server. After interruption, rerun it and revisit Publishing jobs. Do not run multiple publishing backend workers or reload-mode servers against the same publishing state: an OS file lock enforces one publishing worker.
 
-For a custom Python installation, set `STUDIO_PYTHON` to the environment's `python.exe`. `STUDIO_PORT` changes the preferred local port. `scripts/launch_studio.ps1 -NoBrowser` starts without opening a browser. Running the launcher normally unlocks the studio using a fragment that is removed from the address bar and exchanged for an HttpOnly browser session.
+For a custom Python installation, set `STUDIO_PYTHON` to the environment's `python.exe`. `STUDIO_PORT` changes the preferred local port. `scripts/launch_studio.ps1 -NoBrowser` starts without opening a browser, `-AccessLog` adds one line per HTTP request to the window and the log file, and `-Title` renames the console window. `Launch Studio.cmd` passes any of these options straight through. Running the launcher normally unlocks the studio using a fragment that is removed from the address bar and exchanged for an HttpOnly browser session.
 
 ## Google Cloud: One-Time Setup
 
