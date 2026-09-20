@@ -58,7 +58,11 @@ class OAuth:
                 raise ValueError("Wrong YouTube channel. This profile is already bound to a different channel.")
             credential_id = profile.get("credential_id") or uuid.uuid4().hex
             self.settings.set_secret("grant:" + credential_id, flow.credentials.to_json())
-            profile.update(channel_id=channel["id"], channel_name=channel["snippet"]["title"], credential_id=credential_id)
+            custom_url = channel["snippet"].get("customUrl", "")
+            # Legacy custom URLs are not necessarily handles; do not invent one.
+            handle = custom_url if custom_url.startswith("@") else None
+            profile.update(channel_id=channel["id"], channel_name=channel["snippet"]["title"],
+                           channel_handle=handle, credential_id=credential_id, connection_status="connected")
             self.store.put("profiles", profile, profile["id"])
         return profile
 
@@ -72,11 +76,23 @@ class OAuth:
                 try:
                     credentials.refresh(Request())
                 except RefreshError as exc:
+                    if getattr(exc, "retryable", False):
+                        raise PublishingError("Google token service unavailable. Retrying.", "retry_wait") from exc
+                    self._connection_status(profile, "needs_reauth")
                     raise PublishingError("Google access expired or was revoked. Reconnect this channel, then retry.", "needs_reauth") from exc
                 except TransportError as exc:
                     raise PublishingError("Google token service unavailable. Retrying.", "retry_wait") from exc
                 self.settings.set_secret("grant:" + profile["credential_id"], credentials.to_json())
+                self._connection_status(profile, "connected")
             return credentials
+
+    def _connection_status(self, profile, status):
+        if not profile.get("id"):
+            return
+        with self.lock:
+            current = self.store.get("profiles", profile["id"])
+            if current.get("credential_id") == profile.get("credential_id"):
+                self.store.put("profiles", {**current, "connection_status": status}, current["id"])
 
     @staticmethod
     def channel(token):
@@ -85,6 +101,8 @@ class OAuth:
                                  headers={"Authorization": "Bearer " + token}, timeout=30)
         except httpx.TransportError as exc:
             raise PublishingError("Cannot verify the channel. Retrying.", "retry_wait") from exc
+        if response.status_code == 429 or response.status_code >= 500:
+            raise PublishingError("YouTube channel verification is temporarily unavailable. Retrying.", "retry_wait")
         if response.status_code != 200:
             raise PublishingError("Cannot verify channel ownership. Reconnect with YouTube read and upload access.", "needs_reauth")
         items = response.json().get("items", [])
@@ -94,8 +112,14 @@ class OAuth:
 
     def verify(self, profile):
         credentials = self.credentials(profile)
-        channel = self.channel(credentials.token)
+        try:
+            channel = self.channel(credentials.token)
+        except PublishingError as exc:
+            if exc.kind == "needs_reauth":
+                self._connection_status(profile, "needs_reauth")
+            raise
         if channel["id"] != profile.get("channel_id"):
+            self._connection_status(profile, "needs_reauth")
             raise PublishingError("Channel identity mismatch. Upload blocked; reconnect the correct channel.", "needs_reauth")
         return credentials
 

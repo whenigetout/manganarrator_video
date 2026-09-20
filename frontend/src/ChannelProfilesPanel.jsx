@@ -43,6 +43,11 @@ export function ChannelProfilesPanel({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
+  const selectedProfile = profiles.find((p) => p.id === editing);
+  const profileExists = Boolean(selectedProfile);
+  const connectionStatus =
+    selectedProfile?.connection_status ||
+    (selectedProfile?.connected ? "connected" : "disconnected");
   useEffect(() => {
     dialog.current.showModal();
     client
@@ -52,13 +57,20 @@ export function ChannelProfilesPanel({
   }, [client]);
   useEffect(() => {
     const found = profiles.find((p) => p.id === editing);
+    setAuthorizationUrl("");
+    if (editing && !found) return;
     setDraft(
       found
         ? Object.fromEntries(Object.keys(empty).map((k) => [k, found[k]]))
         : { ...empty },
     );
     setTags(found?.tags.join(", ") || "");
-  }, [editing]);
+  }, [editing, profileExists]);
+  useEffect(() => {
+    const refresh = () => onRefresh().catch((e) => setError(e.message));
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [onRefresh]);
   async function act(fn) {
     setBusy(true);
     setError("");
@@ -152,6 +164,50 @@ export function ChannelProfilesPanel({
           <Plus size={16} />
         </button>
       </div>
+      {selectedProfile && (
+        <section className="section" aria-label="YouTube channel connection">
+          <h3>YouTube channel</h3>
+          <p role="status">
+            Connection status:{" "}
+            {connectionStatus === "connected"
+              ? "Connected"
+              : connectionStatus === "needs_reauth"
+                ? "Reconnect required"
+                : "Disconnected"}
+          </p>
+          <p>
+            Channel title: {selectedProfile.channel_name || "Not connected"}
+          </p>
+          <p>
+            Channel handle: {selectedProfile.channel_handle || "Not available"}
+          </p>
+          <p className="job-id">
+            Channel ID: {selectedProfile.channel_id || "Not connected"}
+          </p>
+          <div className="footer-actions">
+            <button
+              disabled={busy || !setup?.google_configured}
+              onClick={connectChannel}
+            >
+              <Link size={16} />
+              {selectedProfile.channel_id
+                ? "Reconnect YouTube channel"
+                : "Connect YouTube channel"}
+            </button>
+            <button
+              disabled={busy || connectionStatus === "disconnected"}
+              onClick={() =>
+                act(() =>
+                  client.call(`/profiles/${editing}/disconnect`, "POST"),
+                )
+              }
+            >
+              <Unplug size={16} />
+              Disconnect
+            </button>
+          </div>
+        </section>
+      )}
       <div className="grid2">
         <label>
           Profile name
@@ -245,24 +301,6 @@ export function ChannelProfilesPanel({
           Save current visual settings
         </button>
         {editing && (
-          <button disabled={busy} onClick={connectChannel}>
-            <Link size={16} />
-            Connect YouTube
-          </button>
-        )}
-        {editing && (
-          <button
-            className="icon"
-            title="Disconnect channel"
-            disabled={busy}
-            onClick={() =>
-              act(() => client.call(`/profiles/${editing}/disconnect`, "POST"))
-            }
-          >
-            <Unplug size={16} />
-          </button>
-        )}
-        {editing && (
           <button
             className="icon"
             title="Delete profile"
@@ -285,12 +323,6 @@ export function ChannelProfilesPanel({
         <a href={authorizationUrl} target="_blank" rel="noreferrer">
           Continue to Google authorization
         </a>
-      )}
-      {profiles.find((p) => p.id === editing)?.channel_id && (
-        <p className="quiet">
-          {profiles.find((p) => p.id === editing).channel_name} |{" "}
-          {profiles.find((p) => p.id === editing).channel_id}
-        </p>
       )}
       <details open={!setup?.google_configured}>
         <summary>

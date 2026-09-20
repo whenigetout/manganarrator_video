@@ -38,6 +38,8 @@ Scopes are `youtube.upload` and `youtube.readonly`. Upload permission sends vide
 
 Every profile has an independent stored grant. Reconnecting preserves that profile's bound channel identity. Disconnect removes its local grant, without issuing an account-wide Google revocation that might disrupt other profiles using the same OAuth client. Google Account security settings can revoke the app globally when desired.
 
+The global Google OAuth client JSON is reused for every profile; do not import it again when adding a channel. Select a saved profile and use **Connect YouTube channel**. Its connection section shows Connected, Disconnected or Reconnect required, plus the authorized channel title, handle when returned as an `@handle`, and channel ID. **Reconnect YouTube channel** renews the same channel's grant; **Disconnect** removes only this profile's local credentials. Missing or legacy custom URLs are not guessed into handles. Older profiles can reconnect to populate their handle. The channel lookup uses `channels.list(part=id,snippet, mine=true)` with that profile's new access token.
+
 Two independent restrictions matter:
 
 - An external OAuth app in **Testing** generally gets refresh tokens lasting seven days for these scopes. Moving the consent configuration to production and meeting applicable verification requirements avoids relying on short-lived testing grants. [Google OAuth expiration rules](https://developers.google.com/identity/protocols/oauth2).

@@ -31,8 +31,10 @@ class ProviderInput(BaseModel):
 
 
 def public_profile(profile, settings):
+    has_grant = bool(settings.get_secret("grant:" + profile.get("credential_id", "")))
+    status = profile.get("connection_status", "connected") if has_grant else "disconnected"
     return {**{k: v for k, v in profile.items() if k != "credential_id"},
-            "connected": bool(settings.get_secret("grant:" + profile.get("credential_id", "")))}
+            "connected": status == "connected", "connection_status": status}
 
 
 def public_run(run):
