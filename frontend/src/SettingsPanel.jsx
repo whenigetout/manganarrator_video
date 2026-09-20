@@ -1,4 +1,4 @@
-import { Download, Plus, Trash2 } from "lucide-react";
+import { Download, Plus, Trash2, ArrowUp, ArrowDown, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { defaultLayer, mergeConfig } from "./config";
 
@@ -63,10 +63,13 @@ export function SettingsPanel({
   uploading,
   source,
   onError,
+  clipNames = {},
 }) {
   const [layer, setLayer] = useState(0);
   const [json, setJson] = useState("");
   const [tab, setTab] = useState("layers");
+  const [scaleWithOutput, setScaleWithOutput] = useState(true);
+  const [preset, setPreset] = useState("center");
   const v = config.visualizers[layer];
   const rc = config.render_config;
   useEffect(() => setJson(JSON.stringify(config, null, 2)), [config]);
@@ -139,6 +142,52 @@ export function SettingsPanel({
       {tab === "layers" && (
         <section className="section">
           <div className="row">
+            <label className="grow">
+              Composition preset
+              <select
+                value={preset}
+                onChange={(e) => setPreset(e.target.value)}
+              >
+                <option value="center">Centered ring</option>
+                <option value="corner">Corner ring</option>
+                <option value="bottom">Bottom spectrum</option>
+                <option value="dual">Ring + spectrum</option>
+              </select>
+            </label>
+            <button
+              onClick={() => {
+                const unit = Math.min(rc.viewport_w, rc.viewport_h);
+                const ring = {
+                  ...defaultLayer(),
+                  position: preset === "corner" ? "bottom_right" : "center",
+                  width: Math.round(unit * (preset === "corner" ? 0.35 : 0.6)),
+                  height: Math.round(unit * (preset === "corner" ? 0.35 : 0.6)),
+                  margin_x: Math.round(rc.viewport_w * 0.04),
+                  margin_y: Math.round(rc.viewport_h * 0.04),
+                };
+                const bars = {
+                  ...defaultLayer(),
+                  kind: "horizontal",
+                  position: "bottom",
+                  width: Math.round(rc.viewport_w * 0.85),
+                  height: Math.max(32, Math.round(rc.viewport_h * 0.18)),
+                  margin_y: Math.round(rc.viewport_h * 0.05),
+                };
+                setTop(
+                  "visualizers",
+                  preset === "dual"
+                    ? [ring, bars]
+                    : preset === "bottom"
+                      ? [bars]
+                      : [ring],
+                );
+                setLayer(0);
+              }}
+            >
+              Apply
+            </button>
+          </div>
+          <div className="row">
             <h3>Layers</h3>
             <button
               className="icon"
@@ -174,6 +223,17 @@ export function SettingsPanel({
                 </option>
               ))}
             </select>
+            <button
+              className="icon"
+              title="Duplicate layer"
+              disabled={!v || config.visualizers.length >= 4}
+              onClick={() => {
+                setTop("visualizers", [...config.visualizers, { ...v }]);
+                setLayer(config.visualizers.length);
+              }}
+            >
+              <Copy size={16} />
+            </button>
             <button
               className="icon"
               title="Remove layer"
@@ -256,6 +316,7 @@ export function SettingsPanel({
                 ["Glow", "glow", 0, 2, 0.1],
                 ["Smoothing", "smoothing", 0, 0.98, 0.02],
                 ["Opacity", "opacity", 0, 1, 0.05],
+                ["Backdrop opacity", "background_opacity", 0, 1, 0.05],
               ].map(([label, key, min, max, step]) => (
                 <Numeric
                   key={key}
@@ -268,6 +329,20 @@ export function SettingsPanel({
                   onChange={(x) => setLayerValue(key, x)}
                 />
               ))}
+              <Numeric
+                label="Minimum frequency (Hz)"
+                value={v.min_frequency}
+                min={20}
+                max={1000}
+                onChange={(x) => setLayerValue("min_frequency", x)}
+              />
+              <Numeric
+                label="Maximum frequency (Hz)"
+                value={v.max_frequency}
+                min={1001}
+                max={20000}
+                onChange={(x) => setLayerValue("max_frequency", x)}
+              />
               <div className="wide">
                 <div className="row">
                   <h3>Palette</h3>
@@ -360,6 +435,62 @@ export function SettingsPanel({
               <div className="quiet">
                 {config.background.media_refs.length} clips selected
               </div>
+              <div className="clip-list">
+                {config.background.media_refs.map((ref, index) => (
+                  <div className="clip-item" key={ref.path + index}>
+                    <span>
+                      {index + 1}.{" "}
+                      {clipNames[ref.path] || ref.path.split(/[\\/]/).at(-1)}
+                    </span>
+                    <button
+                      className="icon"
+                      title="Move clip earlier"
+                      disabled={index === 0}
+                      onClick={() => {
+                        const refs = [...config.background.media_refs];
+                        [refs[index - 1], refs[index]] = [
+                          refs[index],
+                          refs[index - 1],
+                        ];
+                        setBackground("media_refs", refs);
+                      }}
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      className="icon"
+                      title="Move clip later"
+                      disabled={
+                        index === config.background.media_refs.length - 1
+                      }
+                      onClick={() => {
+                        const refs = [...config.background.media_refs];
+                        [refs[index + 1], refs[index]] = [
+                          refs[index],
+                          refs[index + 1],
+                        ];
+                        setBackground("media_refs", refs);
+                      }}
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                    <button
+                      className="icon"
+                      title="Remove background clip"
+                      onClick={() =>
+                        setBackground(
+                          "media_refs",
+                          config.background.media_refs.filter(
+                            (_, i) => i !== index,
+                          ),
+                        )
+                      }
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
               <button onClick={() => setBackground("media_refs", [])}>
                 Clear clips
               </button>
@@ -393,9 +524,39 @@ export function SettingsPanel({
             ].filter((x, i, all) => all.findIndex((y) => y[0] === x[0]) === i)}
             onChange={(value) => {
               const [w, h] = value.split("x").map(Number);
-              setTop("render_config", { ...rc, viewport_w: w, viewport_h: h });
+              const clamp = (x) => Math.max(32, Math.min(3840, Math.round(x)));
+              onChange({
+                ...config,
+                render_config: { ...rc, viewport_w: w, viewport_h: h },
+                visualizers: scaleWithOutput
+                  ? config.visualizers.map((v) => {
+                      const sx = w / rc.viewport_w,
+                        sy = h / rc.viewport_h,
+                        s = Math.min(sx, sy);
+                      return {
+                        ...v,
+                        width: clamp(
+                          v.width * (v.kind === "circular" ? s : sx),
+                        ),
+                        height: clamp(
+                          v.height * (v.kind === "circular" ? s : sy),
+                        ),
+                        margin_x: Math.round(v.margin_x * sx),
+                        margin_y: Math.round(v.margin_y * sy),
+                      };
+                    })
+                  : config.visualizers,
+              });
             }}
           />
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={scaleWithOutput}
+              onChange={(e) => setScaleWithOutput(e.target.checked)}
+            />
+            Scale layers with resolution
+          </label>
           <Select
             label="Frame rate"
             value={String(rc.fps)}

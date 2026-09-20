@@ -1,23 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AudioLines, Image, Video, Film, Plug, Download } from "lucide-react";
+import {
+  AudioLines,
+  Image,
+  Video,
+  Film,
+  Plug,
+  Download,
+  Undo2,
+  Redo2,
+} from "lucide-react";
 import { AudioVideoClient } from "./api";
 import { defaultConfig, exportRequest, mergeConfig } from "./config";
 import { SettingsPanel } from "./SettingsPanel";
 import { JobList } from "./JobList";
 import { useLiveFrame } from "./useLiveFrame";
+import { useConfigHistory } from "./useConfigHistory";
+import { PublishPanel } from "./PublishPanel";
 
 export function AudioVideoStudio({
   apiBase = "",
   initialConfig,
   onRenderStarted,
   onRenderCompleted,
+  publishingToken = "",
+  showPublishing = true,
 }) {
   const [base, setBase] = useState(apiBase);
   const [draftBase, setDraftBase] = useState(apiBase);
   const client = useMemo(() => new AudioVideoClient(base), [base]);
-  const [config, setConfig] = useState(() =>
+  const [config, setConfig, history] = useConfigHistory(() =>
     initialConfig ? mergeConfig(initialConfig) : defaultConfig(),
   );
   const [source, setSource] = useState(null);
@@ -30,6 +43,9 @@ export function AudioVideoStudio({
   const [selected, setSelected] = useState(null);
   const [view, setView] = useState("editor");
   const [seconds, setSeconds] = useState(2);
+  const [backgroundOnly, setBackgroundOnly] = useState(false);
+  const [guides, setGuides] = useState(false);
+  const [clipNames, setClipNames] = useState({});
   const [playingJob, setPlayingJob] = useState(null);
   const videoRef = useRef(null);
   const sourceController = useRef(null);
@@ -38,7 +54,10 @@ export function AudioVideoStudio({
   callbacks.current = { onRenderStarted, onRenderCompleted };
   const live = useLiveFrame(
     client,
-    config,
+    useMemo(
+      () => (backgroundOnly ? { ...config, visualizers: [] } : config),
+      [config, backgroundOnly],
+    ),
     source,
     seconds,
     view === "editor" && !uploading,
@@ -145,11 +164,16 @@ export function AudioVideoStudio({
     setError("");
     try {
       const refs = [];
-      for (const file of files) refs.push(await client.background(file));
+      for (const file of files) {
+        const ref = await client.background(file);
+        refs.push(ref);
+        setClipNames((names) => ({ ...names, [ref.path]: file.name }));
+      }
       setConfig((c) => ({
         ...c,
         background: {
           ...c.background,
+          mode: "media",
           media_refs: [...c.background.media_refs, ...refs],
         },
       }));
@@ -239,12 +263,22 @@ export function AudioVideoStudio({
           uploading={uploading}
           source={source}
           onError={setError}
+          clipNames={clipNames}
         />
         <main className="workspace">
           {error && (
             <div className="error" role="alert">
               {error}
             </div>
+          )}
+          {showPublishing && (
+            <PublishPanel
+              apiBase={base}
+              apiToken={publishingToken}
+              source={source}
+              config={config}
+              onConfig={setConfig}
+            />
           )}
           <div className="toolbar">
             <div className="tabs" role="tablist" aria-label="Preview mode">
@@ -286,6 +320,50 @@ export function AudioVideoStudio({
             </div>
           </div>
           <section hidden={view !== "editor"} aria-label="Live frame editor">
+            <div className="editor-tools">
+              <button
+                className="icon"
+                title="Undo visual settings"
+                disabled={!history.canUndo}
+                onClick={history.undo}
+              >
+                <Undo2 size={17} />
+              </button>
+              <button
+                className="icon"
+                title="Redo visual settings"
+                disabled={!history.canRedo}
+                onClick={history.redo}
+              >
+                <Redo2 size={17} />
+              </button>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={backgroundOnly}
+                  onChange={(e) => setBackgroundOnly(e.target.checked)}
+                />
+                Background only
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={guides}
+                  onChange={(e) => setGuides(e.target.checked)}
+                />
+                Framing guides
+              </label>
+              {live.frame && (
+                <a
+                  className="icon frame-download"
+                  title="Download preview frame"
+                  href={live.frame.url}
+                  download="composition.png"
+                >
+                  <Download size={17} />
+                </a>
+              )}
+            </div>
             <div className="frame-info">
               <span>
                 {rc.viewport_w} x {rc.viewport_h} | {rc.fps} fps
@@ -319,6 +397,9 @@ export function AudioVideoStudio({
                   <span className="empty-label">
                     {live.loading ? "Preparing frame..." : "No frame available"}
                   </span>
+                )}
+                {guides && (
+                  <div className="framing-guides" aria-hidden="true" />
                 )}
               </div>
             </div>

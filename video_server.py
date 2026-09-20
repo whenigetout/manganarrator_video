@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 from pydantic import BaseModel
 import json
 import uuid
+import os
 import app.models.domain as d
 from app.config import VideoConfig
 from app.audio_studio import install_studio, submit, upload_audio
@@ -38,7 +39,13 @@ async def lifespan(app: FastAPI):
     # print("Application startup: Initializing resources...")
     init_db()
     mark_interrupted_audio_jobs()
-    yield  # The application starts serving requests here
+    if publishing is not None:
+        publishing.start()
+    try:
+        yield
+    finally:
+        if publishing is not None:
+            publishing.stop()
     # print("Application shutdown: Cleaning up resources...")
     # # Clean up resources
     # print("Resources cleaned up.")
@@ -55,6 +62,10 @@ app.add_middleware(
 
 config = VideoConfig()
 builder = ChapterVideoBuilder(config)
+publishing = None
+if os.environ.get("PUBLISHING_ENABLED", "0") == "1":
+    from app.publishing.api import install_publishing
+    publishing = install_publishing(app, builder)
 
 
 # -----------------------------------------------------------------------------

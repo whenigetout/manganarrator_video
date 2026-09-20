@@ -32,6 +32,173 @@
   --muted: #a3a6b0;
   --accent: #b9ef7b;
 }
+.audio-studio .publishing {
+  border-bottom: 1px solid var(--border);
+  padding: 0 0 20px;
+  margin-bottom: 20px;
+  display: grid;
+  gap: 12px;
+}
+.audio-studio .publishing h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.audio-studio .publishing h2 svg {
+  color: #ff7272;
+}
+.audio-studio .publish-start {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.audio-studio .publish-start label {
+  flex: 1;
+  min-width: 180px;
+}
+.audio-studio .grow {
+  flex: 1;
+}
+.audio-studio .publishing-runs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 12px;
+}
+.audio-studio .publish-job {
+  min-width: 0;
+}
+.audio-studio .publish-job button {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  text-align: left;
+  width: 100%;
+  padding: 10px;
+  font-size: 12px;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.audio-studio .publish-job button span {
+  color: var(--muted);
+}
+.audio-studio .publish-job .selected-run {
+  border-color: var(--accent);
+}
+.audio-studio .publish-job a {
+  color: var(--accent);
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px;
+}
+.audio-studio .publish-review {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.audio-studio .publish-review video {
+  width: 100%;
+  max-height: 420px;
+  background: #080a0f;
+}
+.audio-studio .publishing textarea,
+.audio-studio .publishing-dialog textarea {
+  min-height: 100px;
+  font: inherit;
+}
+.audio-studio .publishing-dialog {
+  color: #e7e8eb;
+  background: #161719;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(760px, calc(100% - 24px));
+  max-height: 90vh;
+  padding: 24px;
+}
+.audio-studio .publishing-dialog[open] {
+  display: grid;
+  gap: 16px;
+}
+.audio-studio .publishing-dialog::backdrop {
+  background: #000b;
+}
+.audio-studio .publishing-dialog details {
+  display: grid;
+  gap: 12px;
+}
+.audio-studio .publishing-dialog summary {
+  margin-bottom: 12px;
+}
+.audio-studio .publishing-dialog p {
+  overflow-wrap: anywhere;
+}
+.audio-studio .editor-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.audio-studio .editor-tools .download-link {
+  margin: 0;
+}
+.audio-studio .frame-download {
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.audio-studio .framing-guides {
+  position: absolute;
+  inset: 5%;
+  pointer-events: none;
+  border: 1px dashed #fff9;
+  background:
+    linear-gradient(
+      to right,
+      transparent 33.2%,
+      #fff7 33.3%,
+      transparent 33.5%,
+      transparent 66.5%,
+      #fff7 66.6%,
+      transparent 66.8%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 33.2%,
+      #fff7 33.3%,
+      transparent 33.5%,
+      transparent 66.5%,
+      #fff7 66.6%,
+      transparent 66.8%
+    );
+}
+.audio-studio .clip-item {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 0;
+}
+.audio-studio .clip-item span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .audio-studio .publishing-dialog .grid2 {
+    grid-template-columns: 1fr;
+  }
+  .audio-studio .publishing-dialog {
+    padding: 16px;
+  }
+  .audio-studio .publish-start button {
+    width: 100%;
+  }
+}
 .audio-studio * {
   box-sizing: border-box;
 }

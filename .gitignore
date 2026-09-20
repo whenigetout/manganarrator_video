@@ -332,6 +332,12 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python,node,visualstudiocode
 
 # My local 'helper' files
+# Publishing credentials and state must live outside the repository.
+client_secret*.json
+token*.json
+publishing.db*
+publishing-settings.local.json
+.env.*
 jobs/jobs.db*
 local_tmp/*
 output/*

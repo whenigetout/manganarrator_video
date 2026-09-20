@@ -4,6 +4,8 @@ React + Vite frontend for the [MangaNarrator video backend](https://github.com/w
 
 Upload audio once, edit a live backend-rendered still, render a short video preview or full export, and find completed renders by recording filename. The live editor and rendered-video player are separate views.
 
+The optional **YouTube publishing** panel adds saved channel profiles, metadata generation, review, resumable uploads and progress. When using the full backend repository, double-click **Launch Studio.cmd** to start backend and built frontend together. One-time Google/LLM configuration is covered in the backend's `docs/PUBLISHING_GUIDE.md`; daily instructions are in `docs/QUICK_REFERENCE.md`.
+
 ## Run Locally
 
 The updated MangaNarrator video backend must be running on port 8084.
@@ -28,7 +30,8 @@ The backend serves `dist/` at http://127.0.0.1:8084/studio/. Build output is not
 
 - Select MP3/WAV audio. The source uploads once and returns a reusable MediaRef.
 - The **Live editor** updates after edits, without creating a render job. Select **Frame time** to inspect another audio timestamp.
-- **Spectrum**, **Background** and **Export** tabs contain the controls. Resolution changes preserve layer dimensions in pixels, making the relative-size change visible.
+- **Spectrum**, **Background** and **Export** tabs contain the controls. **Scale layers with resolution** preserves relative composition; disable it for fixed pixel dimensions.
+- Composition presets, undo/redo, frequency limits, duplicate layers, background-only preview, clip reordering, framing guides and PNG frame download are available. Background-only mode and guides do not alter exports.
 - Before selecting audio, a labeled demo audio frame is shown.
 - **Preview 5 seconds** renders a short video at the chosen export settings. **Rendered video** remains available while you edit the still.
 - **Render video** renders the full track.
@@ -65,8 +68,12 @@ Props:
 | `initialConfig` | built-in defaults | Initial configuration overrides. |
 | `onRenderStarted` | omitted | Receives the created job. |
 | `onRenderCompleted` | omitted | Receives the completed selected job. |
+| `showPublishing` | `true` | Display the optional publishing panel; render-only hosts can disable it. |
+| `publishingToken` | omitted | Optional runtime owner token used to establish a backend session; never hard-code it in a build. |
 
-The CSS selectors are scoped under `.audio-studio` so controls do not restyle the host app. For remote integration, use the host's authentication/CORS policy. The local backend already enables CORS.
+The CSS selectors are scoped under `.audio-studio` so controls do not restyle the host app. Publishing enforces its own trusted origins and owner authentication independently of legacy CORS. Prefer a same-origin reverse proxy and authenticated session for remote embedding; do not expose the existing unauthenticated renderer directly to the internet.
+
+`src/index.js` also exports `PublishPanel` and `PublishingClient`. A publishing-only integration should wrap the panel in `.audio-studio`, supply `source` (`{audio_ref, name, duration}`), `config`, and a React-setter-compatible `onConfig`, plus `apiBase` when needed. Google credentials and provider keys stay in the backend's OS credential store. The React client never talks directly to an LLM or uploads directly to Google.
 
 For a custom interface, import only the API client:
 

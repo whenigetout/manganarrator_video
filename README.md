@@ -2,6 +2,18 @@
 
 FastAPI and FFmpeg video rendering for MangaNarrator. The existing OCR, segment, image and chapter endpoints remain available. Audio Studio adds an independent audio-to-video workflow.
 
+## One-Click Studio And YouTube Publishing
+
+Double-click **`Launch Studio.cmd`** in this repository. It finds the existing `manganarrator-video` Conda environment, installs missing optional publishing/frontend dependencies, builds the React frontend when needed, and launches both through one local server. Keep its window open. No separate frontend terminal is needed.
+
+**Everyday workflow:** upload recording -> choose saved channel -> **Prepare for YouTube** -> review -> **Approve & upload**. The channel preset is applied automatically. Rendering and metadata generation run without another prompt; uploading never starts before your review. Private is the default; profiles can default to Unlisted, but never Public.
+
+- **[Quick reference](docs/QUICK_REFERENCE.md):** the shortest path from recording to channel.
+- **[Detailed publishing guide](docs/PUBLISHING_GUIDE.md):** one-time Google/LLM setup, channel profiles, secrets, recovery, file locations, APIs and integration.
+- New editor controls: composition presets, undo/redo, frequency limits, backdrop opacity, duplicate layers, resolution-aware scaling, clip reordering, background-only preview, framing guides and PNG frame download. The existing full-resolution live still and rendered-video preview remain available.
+
+Google authorization and an LLM API key are one-time setup steps, not bundled credentials. Enable YouTube Data API v3 and connect each channel separately. Google may restrict uploads from an unaudited API project to Private; the UI reports actual returned privacy rather than claiming the requested visibility succeeded.
+
 ## Audio Studio: Start Here
 
 Activate your backend environment from this repository:
@@ -33,7 +45,7 @@ Before an upload, the live editor shows a labeled deterministic demo audio frame
 
 ## Live Frame Accuracy And Audio Sync
 
-The live frame and export call the same NumPy/OpenCV compositor; FFmpeg handles source decoding, background normalization and video encoding. A still is rendered at the full selected export resolution, then scaled by the browser to fit the editor. Layer sizes stay in output pixels when resolution changes, so their relative size changes visibly.
+The live frame and export call the same NumPy/OpenCV compositor; FFmpeg handles source decoding, background normalization and video encoding. A still is rendered at the full selected export resolution, then scaled by the browser to fit the editor. **Scale layers with resolution** now preserves the relative composition when changing export size; uncheck it to retain exact output-pixel layer dimensions.
 
 At the selected time, the backend replays spectrum analysis from frame zero through the target frame. This preserves the export's smoothing/release history. Decoded audio, analysis results and normalized backgrounds are cached, so color and position changes reuse that work. Generated backgrounds and looped video backgrounds both have pixel-equality regression tests against the export compositor.
 

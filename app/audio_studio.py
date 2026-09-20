@@ -36,6 +36,11 @@ def encoder_capabilities():
         return {"nvenc": False, "encoders": ["libx264"]}
 
 
+def render_locked(builder, request, progress=None):
+    with RENDER_LOCK:
+        return builder.build_audio_video(request, progress)
+
+
 def submit(builder, request):
     rc = request.render_config
     job_id = create_job(d.JobType.build_audio_video, metadata={
@@ -47,13 +52,12 @@ def submit(builder, request):
     })
 
     def run():
-        with RENDER_LOCK:
-            try:
-                result = builder.build_audio_video(request, lambda value, stage: update_progress(job_id, value, stage))
-                update_job(job_id, d.JobStatus.done, result={"type": d.JobType.build_audio_video.value, "data": result})
-            except Exception as exc:
-                update_progress(job_id, 0, "Failed")
-                update_job(job_id, d.JobStatus.failed, error=str(exc))
+        try:
+            result = render_locked(builder, request, lambda value, stage: update_progress(job_id, value, stage))
+            update_job(job_id, d.JobStatus.done, result={"type": d.JobType.build_audio_video.value, "data": result})
+        except Exception as exc:
+            update_progress(job_id, 0, "Failed")
+            update_job(job_id, d.JobStatus.failed, error=str(exc))
 
     threading.Thread(target=run, daemon=True).start()
     return {"status": d.JobStatus.processing, "job_id": job_id}
