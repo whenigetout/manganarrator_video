@@ -1,3 +1,5 @@
+> Returning to this repo? Start with [AGENTS.md](AGENTS.md) and [project context](docs/PROJECT_CONTEXT.md).
+
 # MangaNarrator Video Backend
 
 FastAPI and FFmpeg video rendering for MangaNarrator. The existing OCR, segment, image and chapter endpoints remain available. Audio Studio adds an independent audio-to-video workflow.
@@ -168,3 +170,7 @@ Tests cover FFT frequency response, stereo phase, silence/release, layouts, vali
 With the backend running, `cd frontend` and run `npm run test:e2e` for the live editor, stale-response handling, job labels, video playback, downloads and mobile checks. Chrome is the default test browser.
 
 The original MangaNarrator endpoints remain: `/video/preview/ocrrun`, `/video/preview/load`, `/video/preview/save`, `/video/build/ocrrun`, `/video/build/from_preview`, `/video/build/image` and `/video/build/segment`.
+
+## Story Studio
+
+Open **`/studio/#story`** or select **Story Studio** in the top switcher for normalized manuscript import, separate canon/draft editing, per-segment speech imports, measured timelines, still images and scene/chapter MP4 export. See [Story Studio setup, format and scope](docs/STORY_STUDIO.md). Upgrade the shared contracts package before starting this version.

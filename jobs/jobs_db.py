@@ -115,3 +115,17 @@ def mark_interrupted_audio_jobs():
                         WHERE job_type = ? AND status = ?""",
                      (JobStatus.failed.value, "Interrupted", "Backend restarted before this render finished. Submit it again.",
                       JobType.build_audio_video.value, JobStatus.processing.value))
+
+
+def mark_interrupted_story_jobs():
+    with get_conn() as conn:
+        conn.execute("UPDATE jobs SET status = ?, stage = ?, error = ? WHERE job_type = ? AND status = ?",
+                     (JobStatus.failed.value, "Interrupted", "Backend restarted; submit the story render again.",
+                      JobType.build_story_video.value, JobStatus.processing.value))
+
+
+def list_story_jobs(project_id, limit=100):
+    with get_conn() as conn:
+        rows = conn.execute("SELECT job_id FROM jobs WHERE job_type = ? AND json_extract(metadata, '$.project_id') = ? ORDER BY created_at DESC LIMIT ?",
+                            (JobType.build_story_video.value, project_id, limit)).fetchall()
+    return [get_job(row[0]) for row in rows]

@@ -355,3 +355,7 @@ __pycache__/
 Thumbs.db
 local_tmp/
 output/
+
+# Private Story Studio projects and local test configuration
+story_studio/
+frontend/playwright.story-local.config.js

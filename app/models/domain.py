@@ -225,6 +225,7 @@ class JobType(str, Enum):
     build_segment = "build_segment"
     build_from_preview = "build_from_preview"
     build_audio_video = "build_audio_video"
+    build_story_video = "build_story_video"
 
 class JobResult(BaseModel):
     type: JobType

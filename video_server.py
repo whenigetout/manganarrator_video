@@ -22,6 +22,7 @@ from jobs.jobs_db import (
     update_job,
     get_job,
     mark_interrupted_audio_jobs,
+    mark_interrupted_story_jobs,
 )
 from jobs.decorators import async_job
 from contextlib import asynccontextmanager
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     # print("Application startup: Initializing resources...")
     init_db()
     mark_interrupted_audio_jobs()
+    mark_interrupted_story_jobs()
     if publishing is not None:
         publishing.start()
     try:
@@ -298,6 +300,9 @@ def build_segment_video(
 
 
 install_studio(app, builder)
+
+from app.story.api import install_story
+story_store = install_story(app, builder)
 
 
 @app.post("/video/build/audio", response_model=d.JobCreateResponse)
