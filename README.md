@@ -1,5 +1,7 @@
 > Returning to this repo? Start with [AGENTS.md](AGENTS.md) and [project context](docs/PROJECT_CONTEXT.md).
 
+**Windows / Conda:** [Simple launch and missing-contracts repair guide](docs/CONDA_LAUNCH.md). Audio and Story use one server; both Windows launcher names now start the same app.
+
 # MangaNarrator Video Backend
 
 FastAPI and FFmpeg video rendering for MangaNarrator. The existing OCR, segment, image and chapter endpoints remain available. Audio Studio adds an independent audio-to-video workflow.

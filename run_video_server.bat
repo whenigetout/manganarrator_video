@@ -1,6 +1,4 @@
 @echo off
-setlocal
-call conda activate manganarrator-video
-python scripts\sync_contracts.py
-uvicorn video_server:app --host 0.0.0.0 --port 8084 --reload
-endlocal
+rem Compatibility entry point: both names now start the same Studio server.
+call "%~dp0Launch Studio.cmd" %*
+exit /b %ERRORLEVEL%

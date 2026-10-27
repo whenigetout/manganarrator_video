@@ -1,7 +1,7 @@
 @echo off
 setlocal
 title MangaNarrator Studio - backend + frontend in one server
-echo MangaNarrator Audio Studio
+echo MangaNarrator Studio - Audio and Story
 echo Logs are also written to: %~dp0local_tmp\logs
 echo.
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\launch_studio.ps1" %*
@@ -12,4 +12,4 @@ if not "%studio_exit%"=="0" (
   echo Review the messages above and the log file in %~dp0local_tmp\logs
   pause
 )
-endlocal
+endlocal & exit /b %studio_exit%

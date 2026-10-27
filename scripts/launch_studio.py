@@ -145,7 +145,7 @@ def run(args, path):
 
     def open_studio(port):
         url = f"http://127.0.0.1:{port}/studio/"
-        say("Audio Studio: " + url)
+        say("Audio + Story Studio: " + url)
         say("This single process serves the backend API and the built React app.")
         if not args.no_browser:
             webbrowser.open(url + "#publishingToken=" + token)

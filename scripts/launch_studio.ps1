@@ -32,11 +32,12 @@ function Invoke-StudioCommand {
         Write-Host $text
         try { Add-Content -LiteralPath $logFile -Value $text -Encoding UTF8 } catch { }
     }
+    $script:LASTEXITCODE = $LASTEXITCODE
 }
 
 try {
     try { $Host.UI.RawUI.WindowTitle = $Title } catch { }
-    Write-StudioLog 'MangaNarrator Audio Studio launcher' 'Cyan'
+    Write-StudioLog 'MangaNarrator Studio launcher (Audio + Story)' 'Cyan'
     Write-StudioLog ('Started:    ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
     Write-StudioLog ('Repository: ' + $root)
     Write-StudioLog ('Log file:   ' + $logFile)
@@ -47,9 +48,11 @@ try {
     $prefix = Split-Path -Parent $python
     $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
 
-    & $python -c 'import fastapi, uvicorn, mn_contracts, numpy; from app.config import VideoConfig; VideoConfig()'
+    & $python 'scripts/sync_contracts.py'
+    if ($LASTEXITCODE -ne 0) { throw 'Story contracts setup failed; server was not started.' }
+    & $python -c 'import fastapi, uvicorn, numpy, cv2, PIL, soundfile, multipart; from mn_contracts.story import StoryProject; from app.config import VideoConfig; VideoConfig()'
     if ($LASTEXITCODE -ne 0) {
-        throw ('The backend environment is incomplete (see the traceback above). Install the base requirements with: "' + $python + '" -m pip install -r requirements.txt')
+        throw ('The backend environment is incomplete (see the traceback above). Install the portable Studio requirements with: "' + $python + '" -m pip install -r requirements-story.txt')
     }
     foreach ($tool in @('ffmpeg','ffprobe','node','npm.cmd')) {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool not found. Install FFmpeg and Node.js (20.19+ or 22.12+) and reopen the launcher." }

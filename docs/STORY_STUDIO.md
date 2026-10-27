@@ -1,5 +1,7 @@
 # Story Studio — first production slice
 
+**Windows / Conda:** [Simple launch and missing-contracts repair guide](CONDA_LAUNCH.md). Audio and Story use one server; both Windows launcher names now start the same app.
+
 Story Studio is available alongside Audio Studio at **`/studio/#story`**. Use the top Studio switcher. The existing manga and audio APIs remain available.
 
 ## What works

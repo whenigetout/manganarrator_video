@@ -1,14 +1,13 @@
 # Shared helpers for the MangaNarrator Studio launchers.
 
 function Get-StudioPython {
-    # Same preference order as before: STUDIO_PYTHON, the standard manganarrator-video
-    # Conda environment, then the active Conda prefix.
+    # Explicit override, then the environment the user activated, then defaults.
     $candidates = @($env:STUDIO_PYTHON)
+    if ($env:CONDA_PREFIX) { $candidates += Join-Path $env:CONDA_PREFIX 'python.exe' }
     $candidates += @(
         (Join-Path $env:USERPROFILE 'miniconda3\envs\manganarrator-video\python.exe'),
         (Join-Path $env:USERPROFILE 'anaconda3\envs\manganarrator-video\python.exe')
     )
-    if ($env:CONDA_PREFIX) { $candidates += Join-Path $env:CONDA_PREFIX 'python.exe' }
     return $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 }
 

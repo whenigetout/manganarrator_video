@@ -41,3 +41,9 @@ For story production, first inspect [Story Studio in the video service](https://
 - Executed: all 53 backend tests passed, including 12 Story Studio tests and a real CPU MP4 render; Vite production build passed; shared TypeScript build passed. Playwright passed the real Story Studio import/edit/take/image/timeline/preview/download/reload/lock flow; desktop and 390 px mobile screenshots were visually checked, with no page errors or horizontal overflow. Both existing Audio Studio editor browser tests also passed, including a real preview and reload, after setting a valid Linux media root for the test server.
 - Not exercised: GPU/NVENC, local Chatterbox inference, Windows launchers, real OAuth/upload, complete multi-service manga inference. Existing publishing tests use mocks.
 - Next priorities: native story-segment TTS adapter; portable project/media bundle import/export; scene structure editing; automated adaptation drafts with actual diff/lock semantics. Current profile selectors save editorial instructions only. Do not advertise them as an AI rewrite engine.
+
+### Conda launcher repair — 2026-10-27
+
+Use docs/CONDA_LAUNCH.md. Launch Studio.cmd is the primary entry point; run_video_server.bat forwards to it. Activated Conda now takes precedence over guessed default installations (STUDIO_PYTHON remains explicit override). launch_studio.ps1 ensures the story contracts import before server startup. sync_contracts.py checks first, repairs missing/old contracts using the tested revision and selected interpreter, verifies in a fresh process, and propagates failures. --force explicitly reinstalls. Portable requirements-story.txt is the recommended dependency repair. Windows execution remains unverified in this Linux environment.
+
+Validation: all 57 backend tests passed (four new contracts-bootstrap regression tests), the installed contracts probe passed, and importing the complete video_server app succeeded. No live upload was performed.
