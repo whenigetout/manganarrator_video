@@ -1,19 +1,14 @@
 """Story routes are additive; no OCR, model loading, or automatic publishing."""
 import os
 from pathlib import Path
-import threading
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from mn_contracts.story import StoryProject
-from app.audio_studio import RENDER_LOCK
-from app.models.domain import JobType, JobStatus
-from jobs.jobs_db import create_job, get_job, update_job, update_progress, list_story_jobs
 from .importer import import_story
 from .store import StoryStore, Conflict, safe_id
 from .timeline import compile_timeline
-from .render import render_story
 
 
 class ImportRequest(BaseModel):
@@ -45,7 +40,10 @@ class RenderRequest(RevisionRequest):
 
 def install_story(app, builder):
     root = os.environ.get("STORY_STUDIO_ROOT") or str(Path(builder.config.media_root) / "outputs" / "story_studio")
-    store = StoryStore(root)
+    return install_story_routes(app, StoryStore(root), production=True)
+
+
+def install_story_routes(app, store, *, production=False):
     router = APIRouter(prefix="/video/story")
 
     def call(function, *args, **kwargs):
@@ -95,6 +93,8 @@ def install_story(app, builder):
     def upload(project_id: str, file: UploadFile = File(...), kind: str = Form(...),
                revision: int = Form(...), segment_id: str | None = Form(default=None)):
         try:
+            if not production and kind != "image":
+                raise HTTPException(422, "Only image uploads are supported in preparation mode")
             result, asset = call(store.upload, project_id, file, kind, revision, segment_id)
             return {"project": result, "asset": asset}
         except HTTPException:
@@ -116,6 +116,20 @@ def install_story(app, builder):
     @router.get("/projects/{project_id}/timeline")
     def timeline(project_id: str, chapter_id: str | None = None, scene_id: str | None = None):
         return call(compile_timeline, call(store.read, project_id), chapter_id, scene_id)
+
+    if production:
+        install_render_routes(router, store, call)
+    app.include_router(router)
+    return store
+
+
+def install_render_routes(router, store, call):
+    import threading
+
+    from app.audio_studio import RENDER_LOCK
+    from app.models.domain import JobType, JobStatus
+    from jobs.jobs_db import create_job, get_job, update_job, update_progress, list_story_jobs
+    from .render import render_story
 
     @router.get("/projects/{project_id}/renders")
     def renders(project_id: str):
@@ -156,6 +170,3 @@ def install_story(app, builder):
         path = call(store.folder, project_id) / "renders" / job_id / filename
         return FileResponse(path, filename=filename if download else None,
                             media_type="video/mp4" if filename.endswith("mp4") else "application/json")
-
-    app.include_router(router)
-    return store

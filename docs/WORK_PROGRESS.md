@@ -36,13 +36,30 @@ For backup, stop writes and copy the entire private project root, including hist
 
 Start with ChatGPT copy/paste using selected excerpts. Ask for critique, narration, scene breakdown or image prompts, and review drafts before saving. A future authenticated MCP tool could expose scoped preparation actions when the user's ChatGPT access supports it. The OpenAI API is a separate metered option, with no keys or paid calls added in this phase. See [API pricing](https://platform.openai.com/pricing/).
 
+## Milestone 2 · Preparation API complete
+
+Run this locally with one worker. Set the root to an absolute private path outside the checkout. On Windows PowerShell, set it with `$env:STORY_STUDIO_ROOT = 'C:\Private\StoryStudio'`.
+
+```bash
+python -m pip install -r requirements-preparation.txt
+python scripts/sync_contracts.py
+export STORY_STUDIO_ROOT=/absolute/private/story-studio
+python -m uvicorn app.story.preparation:create_app --factory --host 127.0.0.1 --port 8085 --workers 1
+```
+
+Open `http://127.0.0.1:8085/docs` to exercise the API with the synthetic `fixtures/story-demo.md`. The API reuses project import/list/read/save, history/restore, image uploads and timeline checks. Stale edits return HTTP 409. The existing desktop entry point retains audio uploads, rendering and job routes. This local API has no authentication. Before any remote use, provide private authenticated access and verify the boundary.
+
 ## Files changed and tests
 
-- Milestone 1: `docs/WORK_PROGRESS.md`, `AGENTS.md`. Source baseline `5fa1614`. Audit only, with runtime baseline verification tracked in the next milestone.
+- Milestone 1: `docs/WORK_PROGRESS.md`, `AGENTS.md`. Source baseline `5fa1614`.
+- Milestone 2: `app/story/api.py`, `app/story/preparation.py`, `requirements-preparation.txt`, `tests/test_story_preparation.py`, and this checkpoint.
+- Linux baseline: 57 backend tests and the Vite production build passed after installing Story/publishing dependencies and contracts. A first test attempt before the install completed failed on missing imports.
+- Linux after changes: 59 backend tests passed, including real CPU FFmpeg export, mocked publishing, and simulated tablet/desktop edits, stale-save rejection, image retrieval and restart. Full desktop API import, isolated preparation import without render modules, loopback Uvicorn HTTP smoke test and `git diff --check` passed.
+- Physical tablet, browser UI, Windows launchers, NVENC, full multi-service manga inference and live YouTube OAuth/upload were not exercised.
 
 ## Known problems and next exact task
 
-No shared host is configured. Start milestone 2 by reusing the existing project routes in a preparation-only FastAPI entry point with an explicit persistent root. Test two clients, a stale update, and app restart against the same project directory.
+No shared host or cross-device frontend is configured. Next, add preparation mode to the existing Vite/React Studio and serve it from the preparation API under the same origin. Reuse Library, Manuscript and Visuals. Add plain-text project creation and revision-aware autosave first. On a conflict, retain unsaved edits and prompt for recovery. Test with two browser contexts and a tablet viewport before selecting the private deployment and integrating the Windows render handoff.
 
 ## Resume in a new ChatGPT Work session
 
