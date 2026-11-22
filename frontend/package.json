@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
+    "build:preparation": "vite build --mode preparation",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e": "playwright test",
     "format": "prettier --write src vite.config.js index.html"

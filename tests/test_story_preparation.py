@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.story.preparation import create_app
+from app.story.preparation import create_app, create_editor_app, create_hosted_app
 
 
 DEMO = Path(__file__).parents[1] / "fixtures" / "story-demo.md"
@@ -19,6 +19,34 @@ class PreparationTests(unittest.TestCase):
         for settings in ({}, {"STORY_STUDIO_ROOT": "relative"}):
             with patch.dict(os.environ, settings, clear=True), self.assertRaises(RuntimeError):
                 create_app()
+
+    def test_editor_protects_html_and_api_and_rejects_cross_origin_writes(self):
+        with tempfile.TemporaryDirectory() as root:
+            dist = Path(root) / "dist"
+            dist.mkdir()
+            (dist / "index.html").write_text("<h1>Story Studio</h1>", encoding="utf-8")
+            settings = {
+                "STORY_STUDIO_ROOT": str(Path(root) / "projects"),
+                "STORY_BROWSER_PASSWORD": "browser-test",
+                "STORY_SHARED_TOKEN": "api-test",
+            }
+            with patch.dict(os.environ, settings, clear=True), patch("app.story.preparation.FRONTEND_DIST", dist):
+                with self.assertRaisesRegex(RuntimeError, "persistent volume"):
+                    create_hosted_app()
+                with TestClient(create_editor_app()) as client:
+                    self.assertEqual(client.get("/").status_code, 401)
+                    self.assertIn("Basic", client.get("/").headers["www-authenticate"])
+                    page = client.get("/", auth=("story", "browser-test"))
+                    self.assertEqual(page.status_code, 200)
+                    self.assertIn("Story Studio", page.text)
+                    self.assertEqual(page.headers["cache-control"], "no-store")
+                    self.assertEqual(client.get("/video/story/projects",
+                                               headers={"Authorization": "Bearer api-test"}).json(), [])
+                    payload = {"format": "markdown", "content": DEMO.read_text(encoding="utf-8")}
+                    self.assertEqual(client.post("/video/story/import", auth=("story", "browser-test"),
+                                                 headers={"Origin": "https://other.example"}, json=payload).status_code, 403)
+                    self.assertEqual(client.post("/video/story/import", auth=("story", "browser-test"),
+                                                 headers={"Origin": "http://testserver"}, json=payload).status_code, 200)
 
     def test_authenticated_preparation_can_add_a_scene(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(

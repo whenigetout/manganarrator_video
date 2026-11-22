@@ -1,0 +1,14 @@
+**
+!app/
+!app/**/*.py
+!frontend/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/vite.config.js
+!frontend/src/
+!frontend/src/**
+!scripts/
+!scripts/sync_contracts.py
+!requirements-preparation.txt
+!Dockerfile

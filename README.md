@@ -4,6 +4,8 @@
 
 # MangaNarrator Video Backend
 
+**Tablet authoring:** [Run the same Story Studio on Android or a private host](docs/RUN_STORY_STUDIO.md).
+
 FastAPI and FFmpeg video rendering for MangaNarrator. The existing OCR, segment, image and chapter endpoints remain available. Audio Studio adds an independent audio-to-video workflow.
 
 ## One-Click Studio And YouTube Publishing

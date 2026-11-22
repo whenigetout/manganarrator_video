@@ -5,8 +5,8 @@ import { StoryStudio } from "./StoryStudio";
 import "./studio.css";
 
 function Studios() {
-  const sites = import.meta.env.VITE_STORY_SITE === "1";
-  const [connection, setConnection] = useState(sites ? { preparation: true } : null);
+  const preparationOnly = import.meta.env.MODE === "preparation" || import.meta.env.VITE_STORY_SITE === "1";
+  const [connection, setConnection] = useState(preparationOnly ? { preparation: true } : null);
   const [mode, setMode] = useState(window.location.hash);
   const story = mode === "#story" || mode === "#story-local";
   const shared = mode === "#story" && connection?.preparation;
@@ -16,7 +16,7 @@ function Studios() {
     return () => window.removeEventListener("hashchange", changed);
   }, []);
   useEffect(() => {
-    if (sites) return;
+    if (preparationOnly) return;
     const base = import.meta.env.VITE_API_BASE || "";
     fetch(`${base}/video/story-connection`)
       .then((response) => {
@@ -25,8 +25,8 @@ function Studios() {
       })
       .then(setConnection)
       .catch(() => setConnection({ error: true }));
-  }, [sites]);
-  if (sites) return <StoryStudio preparation />;
+  }, [preparationOnly]);
+  if (preparationOnly) return <StoryStudio preparation />;
   return (
     <>
       <nav className="studio-switcher" aria-label="Studio mode">

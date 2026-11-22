@@ -64,9 +64,16 @@ Open `http://127.0.0.1:8085/docs` to exercise the API with the synthetic `fixtur
 - Linux verification: all 60 backend tests passed. Both Vite modes built successfully and the Sites Worker packaged.
 - Local HTTP integration exercised the packaged Worker with simulated Sites identity and the real desktop server against one authenticated preparation API. It passed creation, reads, desktop chapter edits, adding a scene, stale revision rejection and anonymous/cross-origin denial. Chromium launch was blocked by the container's Unix socket restriction, so browser interaction is pending.
 
+## Milestone 4 · Hosted and Android-compatible preparation entry points
+
+- Added a standalone Vite build and FastAPI static mount, HTTP Basic browser authentication plus bearer API authentication, an authenticated Docker deployment with mandatory persistent mount, and a loopback launcher for Android through Termux and Debian PRoot.
+- Changed `app/story/preparation.py`, `frontend/src/main.jsx`, `frontend/package.json`, `Dockerfile`, `.dockerignore`, `scripts/run_story_preparation.sh`, `tests/test_story_preparation.py`, and the setup docs.
+- Railway Free has limited compute credit and a 0.5 GB persistent volume. No authenticated Railway workspace was available. The Android fallback has instructions for PC access to the tablet's existing store over USB port forwarding.
+- Linux verification: standalone preparation build, live loopback HTTP smoke test, and 61 backend tests passed. No Docker daemon, Android device, or authenticated provider workspace was available for live verification.
+
 ## Known problems and next exact task
 
-Select or provide an always-on host for the canonical API with a persistent volume and HTTPS. Configure the private Site ID, owner email and server secrets, then verify the physical tablet and Windows app against the deployed API with a synthetic project. Follow with the pinned revision-and-assets handoff for desktop rendering. No host or credentials were provisioned in this session.
+Use [Run Story Studio](RUN_STORY_STUDIO.md) to deploy in the owner's Railway workspace or install on their Android tablet. Verify a synthetic project from both devices and after restart before migrating real stories. Follow with the pinned revision-and-assets handoff for desktop rendering.
 
 ## Resume in a new ChatGPT Work session
 
