@@ -375,6 +375,16 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
     .flatMap((s) => s.segments)
     .filter((l) => l.kind !== "silence");
   const measured = spoken.filter((l) => l.audio_asset_id).length;
+  const [copiedShot, setCopiedShot] = useState(null);
+  const speakerName = (line) => line.kind === "dialogue"
+    ? doc.characters.find((character) => character.id === line.character_id)?.name || "Speaker"
+    : line.kind === "narration" ? "Narration" : "Silence";
+  function shotCoverage(shot) {
+    const first = scene.segments.findIndex((line) => line.id === shot.start_segment_id);
+    const last = scene.segments.findIndex((line) => line.id === shot.end_segment_id);
+    if (first < 0 || last < first) return null;
+    return `Lines ${first + 1}–${last + 1} · ${speakerName(scene.segments[first])}: ${scene.segments[first].text.slice(0, 90)}`;
+  }
   const draftText =
     scene?.segments
       .map((l) =>
@@ -676,9 +686,29 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
                           {scene.segments.map((l) => (
                             <div className="story-line" key={l.id}>
                               <div>
-                                <span>{l.kind}</span>
+                                <span>{speakerName(l)}</span>
                                 <code>{l.id}</code>
                               </div>
+                              {l.kind !== "silence" && doc.characters.length > 0 && (
+                                <label>
+                                  Speaker
+                                  <select aria-label={`Speaker ${l.id}`} value={l.character_id || ""}
+                                    onChange={(e) => {
+                                      const characterId = e.target.value;
+                                      editScene((s) => {
+                                        const line = s.segments.find((item) => item.id === l.id);
+                                        line.kind = characterId ? "dialogue" : "narration";
+                                        line.character_id = characterId || null;
+                                      });
+                                    }}>
+                                    <option value="">Narration</option>
+                                    {doc.characters.map((character) => (
+                                      <option key={character.id} value={character.id}>{character.name}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )}
+                              {l.direction && <p className="story-muted">{l.direction}</p>}
                               {l.kind === "silence" ? (
                                 <label>
                                   Silence seconds
@@ -947,9 +977,7 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
                 {section === "Visuals" && (
                   <>
                     <p className="story-muted">
-                      One image can carry several lines. Automatic shots share
-                      the measured scene duration; manual placements keep your
-                      exact seconds.
+                      Edit or copy a suggested prompt, then attach the generated image to that shot.
                     </p>
                     <fieldset disabled={busy || scene.locked}>
                       {scene.shots.map((shot) => (
@@ -980,21 +1008,27 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
                                 }
                               />
                             </label>
+                            {shotCoverage(shot) && <p className="story-muted">{shotCoverage(shot)}</p>}
                             <label>
                               Image prompt
                               <textarea
                                 aria-label={`Prompt ${shot.id}`}
                                 value={shot.prompt}
-                                onChange={(e) =>
-                                  editScene(
-                                    (s) =>
-                                      (s.shots.find(
-                                        (v) => v.id === shot.id,
-                                      ).prompt = e.target.value),
-                                  )
-                                }
+                                onChange={(e) => {
+                                  setCopiedShot(null);
+                                  editScene((s) => {
+                                    s.shots.find((v) => v.id === shot.id).prompt = e.target.value;
+                                  });
+                                }}
                               />
                             </label>
+                            <button type="button" disabled={!shot.prompt.trim()}
+                              onClick={() => act(async () => {
+                                await navigator.clipboard.writeText(shot.prompt);
+                                setCopiedShot(shot.id);
+                              })}>
+                              {copiedShot === shot.id ? "Copied" : "Copy prompt"}
+                            </button>
                             <div className="story-fields">
                               {["timing", "fit", "motion"].map((key) => (
                                 <label key={key}>
