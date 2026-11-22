@@ -74,7 +74,11 @@ function lineDiff(before, after) {
   return rows;
 }
 
-export function StoryStudio({ apiBase = "" }) {
+const newScene = (title, text = "Begin writing here.") => ({
+  id: id("scene"), title, segments: [{ id: id("line"), kind: "narration", text }],
+});
+
+export function StoryStudio({ apiBase = "", preparation = false }) {
   const base = apiBase.replace(/\/$/, "");
   const [library, setLibrary] = useState([]),
     [doc, setDoc] = useState(null),
@@ -84,6 +88,8 @@ export function StoryStudio({ apiBase = "" }) {
   const [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [newText, setNewText] = useState("");
   const [timeline, setTimeline] = useState(null),
     [history, setHistory] = useState([]),
     [restoreTo, setRestoreTo] = useState("");
@@ -143,7 +149,7 @@ export function StoryStudio({ apiBase = "" }) {
     setDoc(p);
     setDirty(false);
     undo.current = [];
-    localStorage.setItem("story-last-project", p.id);
+    localStorage.setItem(preparation ? "story-shared-last-project" : "story-last-project", p.id);
   }
   async function refresh(p, selectedChapter) {
     const ticket = ++generation.current;
@@ -152,7 +158,7 @@ export function StoryStudio({ apiBase = "" }) {
         `/projects/${p.id}/timeline?chapter_id=${encodeURIComponent(selectedChapter || p.arcs[0].chapters[0].id)}`,
       ),
       request(`/projects/${p.id}/history`),
-      request(`/projects/${p.id}/renders`),
+      preparation ? Promise.resolve([]) : request(`/projects/${p.id}/renders`),
     ]);
     if (ticket === generation.current) {
       setTimeline(t);
@@ -163,13 +169,14 @@ export function StoryStudio({ apiBase = "" }) {
   useEffect(() => {
     act(async () => {
       await refreshLibrary();
-      const last = localStorage.getItem("story-last-project");
+      const key = preparation ? "story-shared-last-project" : "story-last-project";
+      const last = localStorage.getItem(key);
       if (last) {
         try {
           const p = await request(`/projects/${last}`);
           accept(p);
         } catch {
-          localStorage.removeItem("story-last-project");
+          localStorage.removeItem(key);
         }
       }
     });
@@ -225,6 +232,48 @@ export function StoryStudio({ apiBase = "" }) {
     accept(updated);
     return updated;
   }
+  useEffect(() => {
+    if (!preparation || !dirty || busy || error) return;
+    const timer = setTimeout(() => act(() => save()), 1500);
+    return () => clearTimeout(timer);
+  }, [preparation, doc, dirty, busy, error]);
+
+  useEffect(() => {
+    if (!preparation || !dirty) return;
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = true;
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [preparation, dirty]);
+
+  async function createProject(event) {
+    event.preventDefault();
+    await act(async () => {
+      if (dirty) await save();
+      const title = newTitle.trim();
+      const text = newText;
+      const p = await request("/import", {
+        method: "POST",
+        body: JSON.stringify({
+          format: "json",
+          content: JSON.stringify({
+            id: id("project"), title, series_title: title,
+            arcs: [{ id: id("arc"), title: "Story", chapters: [{
+              id: id("chapter"), title: "Chapter 1", scenes: [newScene("Scene 1", text.trim() ? text : undefined)],
+            }] }],
+          }),
+        }),
+      });
+      accept(p);
+      setNewTitle("");
+      setNewText("");
+      setSection("Manuscript");
+      await refreshLibrary();
+    });
+  }
+
   async function open(p) {
     if (dirty) await save();
     const next = await request(`/projects/${p.id}`);
@@ -337,7 +386,7 @@ export function StoryStudio({ apiBase = "" }) {
         </div>
         <p className="story-overline">FROM PAGE TO PICTURE</p>
         <nav aria-label="Story sections">
-          {sections.map((name, i) => (
+          {sections.filter((name) => !preparation || !["Voices", "Export"].includes(name)).map((name, i) => (
             <button
               key={name}
               className={section === name ? "active" : ""}
@@ -395,6 +444,9 @@ export function StoryStudio({ apiBase = "" }) {
         {error && (
           <div role="alert" className="story-error">
             {error}
+            {preparation && dirty && doc && (
+              <button onClick={exportManuscript}>Download unsaved manuscript</button>
+            )}
           </div>
         )}
         {busy && (
@@ -408,6 +460,17 @@ export function StoryStudio({ apiBase = "" }) {
               <h2>Your story library</h2>
               <span>{library.length} projects</span>
             </div>
+            {preparation && (
+              <form className="story-line" onSubmit={createProject}>
+                <label>Project title
+                  <input required value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+                </label>
+                <label>Story text
+                  <textarea value={newText} onChange={(e) => setNewText(e.target.value)} />
+                </label>
+                <button disabled={busy || !newTitle.trim()} type="submit">Create project</button>
+              </form>
+            )}
             <div className="story-project-grid">
               {library.map((p) => (
                 <button
@@ -470,6 +533,33 @@ export function StoryStudio({ apiBase = "" }) {
                   ))}
                 </select>
               </label>
+              {preparation && (
+                <>
+                  <label>Project name
+                    <input disabled={busy} value={doc.title} onChange={(e) => edit((p) => { p.title = e.target.value; })} />
+                  </label>
+                  <label>Chapter name
+                    <input disabled={busy} value={chapter.title} onChange={(e) => edit((p) => {
+                      p.arcs.flatMap((a) => a.chapters).find((c) => c.id === chapter.id).title = e.target.value;
+                    })} />
+                  </label>
+                  <button disabled={busy} onClick={() => {
+                    const next = { id: id("chapter"), title: `Chapter ${chapters.length + 1}`, scenes: [newScene("Scene 1")] };
+                    edit((p) => p.arcs.find((a) => a.chapters.some((c) => c.id === chapter.id)).chapters.push(next));
+                    setChapterId(next.id);
+                    setSceneId(next.scenes[0].id);
+                  }}>Add chapter</button>
+                  <button disabled={busy} onClick={() => {
+                    const next = newScene(`Scene ${chapter.scenes.length + 1}`);
+                    edit((p) => p.arcs.flatMap((a) => a.chapters).find((c) => c.id === chapter.id).scenes.push(next));
+                    setSceneId(next.id);
+                  }}>Add scene</button>
+                  <label>Scene name
+                    <input disabled={busy || scene.locked} value={scene.title} onChange={(e) => editScene((s) => { s.title = e.target.value; })} />
+                  </label>
+                  <button onClick={exportManuscript}>Export manuscript JSON</button>
+                </>
+              )}
               <span className="story-badge">
                 <AudioLines size={14} />
                 {measured}/{spoken.length} takes imported

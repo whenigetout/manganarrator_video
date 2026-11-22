@@ -4,5 +4,5 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   base: "./",
-  server: { proxy: { "/video": "http://127.0.0.1:8084" } },
+  server: { proxy: { "/video": "http://127.0.0.1:8084", "/shared-story": "http://127.0.0.1:8084" } },
 });

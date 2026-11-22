@@ -304,6 +304,9 @@ install_studio(app, builder)
 from app.story.api import install_story
 story_store = install_story(app, builder)
 
+from app.story.shared import install_shared_story
+install_shared_story(app)
+
 
 @app.post("/video/build/audio", response_model=d.JobCreateResponse)
 def build_audio_video(request: d.AudioVideoRequest = Body(...)):

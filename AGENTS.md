@@ -18,7 +18,7 @@ Start here: video_server.py; app/audio_studio.py; app/audio_spectrum.py; app/aud
 - Preserve existing manga behavior and public API shapes. Keep novel/story models separate from OCR geometry.
 - Prefer the smallest useful increment. Reuse the ecosystem's existing rendering, voice and media facilities.
 - Keep user manuscripts, conversation exports, generated private story assets, credentials and tokens out of public source control. Use synthetic fixtures.
-- For synchronized Story Studio, commit each tested milestone to `story-studio-shared` and update `docs/WORK_PROGRESS.md` before handoff. Merging to main requires explicit approval. Never force-push over others' work.
+- For synchronized Story Studio, update `docs/WORK_PROGRESS.md` before handoff and commit tested milestones. Follow the current task’s branch and merge authorization. Never force-push over others' work.
 - YouTube publishing, paid generation and sharing private content require the owner's explicit task authorization. Do not enable them as a test side effect.
 - Report exactly which checks ran, passed, failed or were blocked. A syntax check is not an end-to-end test.
 

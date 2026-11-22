@@ -83,7 +83,7 @@ class StoryStore:
             project.revision = 0
             return self._write(project)
 
-    def save(self, identifier, proposed, expected_revision):
+    def save(self, identifier, proposed, expected_revision, *, allow_new_scenes=False):
         with self.lock:
             current = self.read(identifier)
             if current.revision != expected_revision:
@@ -92,7 +92,7 @@ class StoryStore:
                 raise ValueError("Project identity and asset metadata are managed by the server")
             old = {s.id: s for s in scenes(current)}
             new = {s.id: s for s in scenes(proposed)}
-            if old.keys() != new.keys():
+            if not old.keys() <= new.keys() or (not allow_new_scenes and old.keys() != new.keys()):
                 raise ValueError("This slice preserves imported scenes; import a new manuscript to change scene structure")
             for key, previous in old.items():
                 candidate = new[key]

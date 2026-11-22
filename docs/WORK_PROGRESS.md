@@ -26,7 +26,7 @@ Use this GitHub repo for both tablet authoring and Windows production. Both edit
 
 ## Architecture decision
 
-Use the same React application and Python story models and routes from this repo. Run one preparation API on a privately reachable, always-on host with one worker and a persistent disk outside the checkout. Both devices eventually open the same URL. Keep JSON and revision checks. Keep personal stories and media outside GitHub. A separate SQLite database or GitHub-backed document store would add schema/hosting or asset and conflict-handling work without replacing a missing requirement.
+Use the same React application and Python story models and routes from this repo. Run one preparation API on a privately reachable, always-on host with one worker and a persistent disk outside the checkout. The owner-private Site Worker and the Windows loopback server proxy the same preparation API. Each serves a build of the same React source. Keep JSON and revision checks. Keep personal stories and media outside GitHub. A separate SQLite database or GitHub-backed document store would add schema/hosting or asset and conflict-handling work without replacing a missing requirement.
 
 For Windows rendering, plan an authenticated handoff of a pinned project revision and its referenced files to a temporary render input. The render input is derived, read-only project data. Write any production changes to the canonical API with the existing revision guard. Verify this path separately before claiming shared Windows production. Keep local launchers and existing local projects working throughout.
 
@@ -47,7 +47,7 @@ export STORY_STUDIO_ROOT=/absolute/private/story-studio
 python -m uvicorn app.story.preparation:create_app --factory --host 127.0.0.1 --port 8085 --workers 1
 ```
 
-Open `http://127.0.0.1:8085/docs` to exercise the API with the synthetic `fixtures/story-demo.md`. The API reuses project import/list/read/save, history/restore, image uploads and timeline checks. Stale edits return HTTP 409. The existing desktop entry point retains audio uploads, rendering and job routes. This local API has no authentication. Before any remote use, provide private authenticated access and verify the boundary.
+Open `http://127.0.0.1:8085/docs` to exercise the API with the synthetic `fixtures/story-demo.md`. The API reuses project import/list/read/save, history/restore, image uploads and timeline checks. Stale edits return HTTP 409. The existing desktop entry point retains audio uploads, rendering and job routes. Set `STORY_SHARED_TOKEN` before any remote use and serve it through HTTPS. See [shared setup](SHARED_STORY_STUDIO.md).
 
 ## Files changed and tests
 
@@ -57,10 +57,17 @@ Open `http://127.0.0.1:8085/docs` to exercise the API with the synthetic `fixtur
 - Linux after changes: 59 backend tests passed, including real CPU FFmpeg export, mocked publishing, and simulated tablet/desktop edits, stale-save rejection, image retrieval and restart. Full desktop API import, isolated preparation import without render modules, loopback Uvicorn HTTP smoke test and `git diff --check` passed.
 - Physical tablet, browser UI, Windows launchers, NVENC, full multi-service manga inference and live YouTube OAuth/upload were not exercised.
 
+## Milestone 3 · Shared editor and Sites build
+
+- Same React Story Studio in the Site Worker and local desktop app. Shared mode supports paste, project/chapter/scene naming, adding chapters and scenes, revision-aware autosave, image planning and manuscript export. The original local renderer is available separately.
+- Changed `frontend/src/{main.jsx,StoryStudio.jsx}`, `frontend/vite.config.js`, `frontend/sites/`, `app/story/{api,preparation,shared,store}.py`, `video_server.py`, and `tests/test_story_preparation.py`. Configuration and backups are in `docs/SHARED_STORY_STUDIO.md`.
+- Linux verification: all 60 backend tests passed. Both Vite modes built successfully and the Sites Worker packaged.
+- Local HTTP integration exercised the packaged Worker with simulated Sites identity and the real desktop server against one authenticated preparation API. It passed creation, reads, desktop chapter edits, adding a scene, stale revision rejection and anonymous/cross-origin denial. Chromium launch was blocked by the container's Unix socket restriction, so browser interaction is pending.
+
 ## Known problems and next exact task
 
-No shared host or cross-device frontend is configured. Next, add preparation mode to the existing Vite/React Studio and serve it from the preparation API under the same origin. Reuse Library, Manuscript and Visuals. Add plain-text project creation and revision-aware autosave first. On a conflict, retain unsaved edits and prompt for recovery. Test with two browser contexts and a tablet viewport before selecting the private deployment and integrating the Windows render handoff.
+Select or provide an always-on host for the canonical API with a persistent volume and HTTPS. Configure the private Site ID, owner email and server secrets, then verify the physical tablet and Windows app against the deployed API with a synthetic project. Follow with the pinned revision-and-assets handoff for desktop rendering. No host or credentials were provisioned in this session.
 
 ## Resume in a new ChatGPT Work session
 
-Check out `story-studio-shared` in this repository. Read this file and `AGENTS.md`, then `git status -sb` and `git log -4 --oneline`. Read only the relevant diff and tests for the next exact task. Update this file and commit each tested milestone on this branch. Public deployment, paid services, deletion of existing data, and merge to main require approval.
+Check out GitHub `main`. Read this file, `AGENTS.md` and `SHARED_STORY_STUDIO.md`, then inspect the relevant recent commit. Keep existing environment files private and reuse them when available. Record setting names and host/deployment state here without copying secrets. Update this file after each tested milestone.

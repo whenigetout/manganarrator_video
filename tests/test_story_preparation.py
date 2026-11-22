@@ -20,6 +20,26 @@ class PreparationTests(unittest.TestCase):
             with patch.dict(os.environ, settings, clear=True), self.assertRaises(RuntimeError):
                 create_app()
 
+    def test_authenticated_preparation_can_add_a_scene(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(
+            os.environ, STORY_STUDIO_ROOT=root, STORY_SHARED_TOKEN="test-only"
+        ), TestClient(create_app()) as client:
+            self.assertEqual(client.get("/video/story/projects").status_code, 401)
+            client.headers["Authorization"] = "Bearer test-only"
+            response = client.post("/video/story/import", json={
+                "format": "markdown", "content": DEMO.read_text(encoding="utf-8"),
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            draft = response.json()
+            chapter = draft["arcs"][0]["chapters"][0]
+            chapter["scenes"].append({
+                "id": "new-scene", "title": "New scene",
+                "segments": [{"id": "new-line", "kind": "narration", "text": "A new draft."}],
+            })
+            response = client.put(f"/video/story/projects/{draft['id']}", json=draft)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.headers["cache-control"], "no-store")
+
     def test_shared_edits_revision_conflict_and_restart(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, STORY_STUDIO_ROOT=root):
             app = create_app()

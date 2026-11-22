@@ -75,7 +75,7 @@ def install_story_routes(app, store, *, production=False):
 
     @router.put("/projects/{project_id}")
     def save(project_id: str, project: StoryProject):
-        return call(store.save, project_id, project, project.revision)
+        return call(store.save, project_id, project, project.revision, allow_new_scenes=not production)
 
     @router.get("/projects/{project_id}/history")
     def history(project_id: str):
