@@ -6,7 +6,7 @@ export default {
     }
     const url = new URL(request.url);
     if (url.pathname.startsWith("/video/story/")) {
-      if (!["GET", "POST", "PUT"].includes(request.method)) {
+      if (!["GET", "POST", "PUT", "DELETE"].includes(request.method)) {
         return new Response(null, { status: 405 });
       }
       const origin = request.headers.get("origin");

@@ -53,12 +53,25 @@ class StoryStore:
         return path
 
     def read(self, identifier):
-        return StoryProject.model_validate_json((self.folder(identifier) / "project.json").read_text(encoding="utf-8"))
+        with self.lock:
+            folder = self.folder(identifier)
+            if (folder / ".deleted").exists():
+                raise FileNotFoundError(identifier)
+            return StoryProject.model_validate_json((folder / "project.json").read_text(encoding="utf-8"))
+
+    def delete(self, identifier, expected_revision):
+        with self.lock:
+            if self.read(identifier).revision != expected_revision:
+                raise Conflict("The project changed. Reopen it before deleting.")
+            (self.folder(identifier) / ".deleted").touch(exist_ok=False)
 
     def list(self):
         result = []
         for file in sorted(self.root.glob("*/project.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-            project = self.read(file.parent.name)
+            try:
+                project = self.read(file.parent.name)
+            except FileNotFoundError:
+                continue
             result.append({"id": project.id, "title": project.title, "series_title": project.series_title,
                            "revision": project.revision})
         return result
@@ -110,14 +123,16 @@ class StoryStore:
             return self._write(proposed)
 
     def history(self, identifier):
+        self.read(identifier)
         return sorted(int(p.stem) for p in (self.folder(identifier) / "history").glob("*.json"))
 
     def restore(self, identifier, revision, expected):
         with self.lock:
             if revision < 0:
                 raise ValueError("Invalid revision")
+            current = self.read(identifier)
             old = StoryProject.model_validate_json((self.folder(identifier) / "history" / f"{revision}.json").read_text(encoding="utf-8"))
-            old.assets = self.read(identifier).assets  # retain all takes, including later imports
+            old.assets = current.assets  # retain all takes, including later imports
             return self.save(identifier, old, expected)
 
     def duplicate(self, identifier, expected):

@@ -149,7 +149,6 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
     setDoc(p);
     setDirty(false);
     undo.current = [];
-    localStorage.setItem(preparation ? "story-shared-last-project" : "story-last-project", p.id);
   }
   async function refresh(p, selectedChapter) {
     const ticket = ++generation.current;
@@ -167,19 +166,7 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
     }
   }
   useEffect(() => {
-    act(async () => {
-      await refreshLibrary();
-      const key = preparation ? "story-shared-last-project" : "story-last-project";
-      const last = localStorage.getItem(key);
-      if (last) {
-        try {
-          const p = await request(`/projects/${last}`);
-          accept(p);
-        } catch {
-          localStorage.removeItem(key);
-        }
-      }
-    });
+    act(refreshLibrary);
   }, []);
   useEffect(() => {
     if (doc && !dirty)
@@ -270,6 +257,28 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
       setNewTitle("");
       setNewText("");
       setSection("Manuscript");
+      await refreshLibrary();
+    });
+  }
+
+  async function closeProject() {
+    if (dirty) await save();
+    generation.current += 1;
+    setDoc(null);
+    setChapterId("");
+    setSceneId("");
+    setJob(null);
+    setJobs([]);
+    setHistory([]);
+    setTimeline(null);
+    setSection("Library");
+    await refreshLibrary();
+  }
+
+  function deleteProject(p) {
+    if (!window.confirm(`Delete “${p.title}” from your Story Studio library?`)) return;
+    act(async () => {
+      await request(`/projects/${p.id}?revision=${p.revision}`, { method: "DELETE" });
       await refreshLibrary();
     });
   }
@@ -386,11 +395,12 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
         </div>
         <p className="story-overline">FROM PAGE TO PICTURE</p>
         <nav aria-label="Story sections">
-          {sections.filter((name) => !preparation || !["Voices", "Export"].includes(name)).map((name, i) => (
+          {sections.filter((name) => name === "Library" || (doc && (!preparation || !["Voices", "Export"].includes(name)))).map((name, i) => (
             <button
               key={name}
               className={section === name ? "active" : ""}
-              onClick={() => setSection(name)}
+              disabled={busy}
+              onClick={() => name === "Library" && doc ? act(closeProject) : setSection(name)}
             >
               <span>0{i + 1}</span>
               {name}
@@ -473,9 +483,9 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
             )}
             <div className="story-project-grid">
               {library.map((p) => (
+                <div key={p.id}>
                 <button
-                  className="story-project"
-                  key={p.id}
+                  className="story-project story-project-open"
                   disabled={busy}
                   onClick={() => act(() => open(p))}
                 >
@@ -488,6 +498,10 @@ export function StoryStudio({ apiBase = "", preparation = false }) {
                     Revision {p.revision} <span>Open manuscript →</span>
                   </p>
                 </button>
+                <button disabled={busy} aria-label={`Delete ${p.title}`} onClick={() => deleteProject(p)}>
+                  Delete project
+                </button>
+                </div>
               ))}
               {!library.length && (
                 <div className="story-empty">

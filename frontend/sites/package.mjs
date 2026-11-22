@@ -3,8 +3,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 const here = new URL(".", import.meta.url);
 const frontendDist = new URL("../dist/", here);
 const output = new URL("../../dist/server/", here);
-const entries = ["/index.html", ...(await readdir(new URL("assets/", frontendDist))).map((name) => `/assets/${name}`)];
-const types = { html: "text/html", js: "text/javascript", css: "text/css" };
+const entries = ["/index.html", "/story-studio.svg", ...(await readdir(new URL("assets/", frontendDist))).map((name) => `/assets/${name}`)];
+const types = { html: "text/html", js: "text/javascript", css: "text/css", svg: "image/svg+xml" };
 const assets = {};
 for (const path of entries) {
   const type = types[path.split(".").pop()];

@@ -48,6 +48,25 @@ class PreparationTests(unittest.TestCase):
                     self.assertEqual(client.post("/video/story/import", auth=("story", "browser-test"),
                                                  headers={"Origin": "http://testserver"}, json=payload).status_code, 200)
 
+    def test_delete_hides_project_but_retains_draft_and_rejects_stale_revision(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(
+            os.environ, STORY_STUDIO_ROOT=root
+        ), TestClient(create_app()) as client:
+            result = client.post("/video/story/import", json={
+                "format": "markdown", "content": DEMO.read_text(encoding="utf-8"),
+            })
+            draft = result.json()
+            url = f"/video/story/projects/{draft['id']}"
+            draft["title"] = "Updated title"
+            self.assertEqual(client.put(url, json=draft).status_code, 200)
+            self.assertEqual(client.delete(url, params={"revision": 0}).status_code, 409)
+            self.assertEqual(client.delete(url, params={"revision": 1}).status_code, 200)
+            self.assertEqual(client.get("/video/story/projects").json(), [])
+            self.assertEqual(client.get(url).status_code, 404)
+            self.assertEqual(client.get(url + "/history").status_code, 404)
+            self.assertEqual(client.put(url, json=draft).status_code, 404)
+            self.assertTrue((Path(root) / draft["id"] / "project.json").is_file())
+
     def test_authenticated_preparation_can_add_a_scene(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(
             os.environ, STORY_STUDIO_ROOT=root, STORY_SHARED_TOKEN="test-only"

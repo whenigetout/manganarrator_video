@@ -73,6 +73,11 @@ def install_story_routes(app, store, *, production=False):
     def project(project_id: str):
         return call(store.read, project_id)
 
+    @router.delete("/projects/{project_id}")
+    def delete_project(project_id: str, revision: int):
+        call(store.delete, project_id, revision)
+        return {"deleted": True}
+
     @router.put("/projects/{project_id}")
     def save(project_id: str, project: StoryProject):
         return call(store.save, project_id, project, project.revision, allow_new_scenes=not production)
@@ -161,6 +166,7 @@ def install_render_routes(router, store, call):
 
     @router.get("/projects/{project_id}/renders/{job_id}/{filename}")
     def rendered(project_id: str, job_id: str, filename: str, download: bool = False):
+        call(store.read, project_id)
         call(safe_id, job_id)
         job = get_job(job_id)
         if filename not in {"episode.mp4", "manifest.json"} or not job or job.status != JobStatus.done or not job.result:

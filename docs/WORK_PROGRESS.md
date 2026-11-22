@@ -78,3 +78,10 @@ Use [Run Story Studio](RUN_STORY_STUDIO.md) to deploy in the owner's Railway wor
 ## Resume in a new ChatGPT Work session
 
 Check out GitHub `main`. Read this file, `AGENTS.md` and `SHARED_STORY_STUDIO.md`, then inspect the relevant recent commit. Keep existing environment files private and reuse them when available. Record setting names and host/deployment state here without copying secrets. Update this file after each tested milestone.
+
+## Library navigation and project removal
+
+- Story Studio opens in the library. Opening a project or importing a manuscript enters its editor. Returning to Library saves pending edits first and closes the project.
+- Delete uses a revision check and a recoverable marker. Normal read, write and listing routes treat the deleted project as unavailable. See `RUN_STORY_STUDIO.md` for recovery.
+- Added the Story Studio favicon to regular, preparation, Docker and Sites builds.
+- Verified 62 backend tests, regular and preparation Vite builds, Sites packaging, and import/readback plus timeline compilation for all episodes of the user's privately delivered manuscript. The manuscript is held outside this repository.

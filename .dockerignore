@@ -8,6 +8,8 @@
 !frontend/vite.config.js
 !frontend/src/
 !frontend/src/**
+!frontend/public/
+!frontend/public/**
 !scripts/
 !scripts/sync_contracts.py
 !requirements-preparation.txt

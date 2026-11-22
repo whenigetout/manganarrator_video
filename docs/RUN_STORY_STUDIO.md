@@ -14,6 +14,10 @@ Both options use the same preparation editor from GitHub. Choose one host for yo
 
 A Railway account and GitHub connection are required. The container and volume checks do not select or change your billing plan.
 
+### Open, close, or delete a project
+
+Story Studio starts in the Library. Open a project to show its Manuscript and Visuals sections. Choose Library again to save pending edits and close the editor. Use **Delete project** on a Library card to remove it from normal access. The server retains the project files. To recover a deleted project, stop the service and remove the `.deleted` marker from that project's folder in the configured project root, then restart the service.
+
 ## Option B · Run on your Android tablet or phone
 
 This uses [Termux](https://github.com/termux/termux-app#installation) with a [Debian PRoot environment](https://github.com/termux/proot-distro). Debian supplies the Linux ARM64 Python dependencies and a compatible Node version on devices such as the Galaxy Tab S9 FE+. Android does not need root. The preparation editor needs no FFmpeg, OCR or TTS.

@@ -30,7 +30,7 @@ def install_shared_story(app):
 
     import httpx
 
-    @app.api_route("/shared-story/video/story/{path:path}", methods=["GET", "POST", "PUT"])
+    @app.api_route("/shared-story/video/story/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def proxy(path: str, request: Request):
         # The Windows service is local. Block cross-origin browser requests from
         # using it as a bridge to the authenticated upstream.
@@ -54,7 +54,7 @@ def install_shared_story(app):
         try:
             outgoing = client.build_request(
                 request.method, target, headers=headers,
-                content=request.stream() if request.method != "GET" else None,
+                content=request.stream() if request.method in ("POST", "PUT") else None,
             )
             response = await client.send(outgoing, stream=True)
         except httpx.HTTPError:

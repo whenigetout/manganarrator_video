@@ -740,3 +740,5 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.story-project-open { width: 100%; }

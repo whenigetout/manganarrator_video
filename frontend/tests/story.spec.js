@@ -98,7 +98,9 @@ test("import, edit, voices, images, render, persistence and mobile", async ({
   expect(manifest.timeline.duration).toBeCloseTo(0.8, 2);
   expect(manifest.render.scene_id).toBe("gate");
   await page.reload();
-  await page.getByRole("button", { name: /Manuscript$/ }).click();
+  await expect(page.getByRole("button", { name: /Manuscript$/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Visuals$/ })).toHaveCount(0);
+  await page.getByRole("button", { name: /Open manuscript/ }).filter({ hasText: "The Lantern Road" }).first().click();
   await expect(page.getByLabel("Text line-one")).toHaveValue(
     "A lantern waited above the closed gate.",
   );
@@ -121,5 +123,8 @@ test("import, edit, voices, images, render, persistence and mobile", async ({
       () => document.documentElement.scrollWidth > innerWidth,
     ),
   ).toBe(false);
+  await page.getByRole("button", { name: /Library$/ }).click();
+  await expect(page.getByRole("button", { name: /Manuscript$/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Your story library" })).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -4,6 +4,7 @@ COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/index.html frontend/vite.config.js ./
 COPY frontend/src ./src
+COPY frontend/public ./public
 RUN npm run build:preparation
 
 FROM python:3.12-slim
