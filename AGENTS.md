@@ -2,7 +2,7 @@
 
 ## Read only what the task needs
 
-1. Read this file, then [project context](docs/PROJECT_CONTEXT.md).
+1. For synchronized Story Studio work, read [work progress](docs/WORK_PROGRESS.md) first. Use [project context](docs/PROJECT_CONTEXT.md) for the relevant existing subsystem.
 2. Check `git status --short` and recent commits. The context doc records the review baseline; inspect changes to relevant paths since that baseline if needed.
 3. Use the path map below to open only the affected modules, their contracts and relevant tests. Do not begin every session with a full-repository or eight-repository audit.
 4. If a documented fact disagrees with code, verify the smallest relevant path and correct the note. Documentation is a map, not proof that runtime behavior works.
@@ -18,7 +18,7 @@ Start here: video_server.py; app/audio_studio.py; app/audio_spectrum.py; app/aud
 - Preserve existing manga behavior and public API shapes. Keep novel/story models separate from OCR geometry.
 - Prefer the smallest useful increment. Reuse the ecosystem's existing rendering, voice and media facilities.
 - Keep user manuscripts, conversation exports, generated private story assets, credentials and tokens out of public source control. Use synthetic fixtures.
-- The owner prefers coherent tested commits directly to `main`; follow the current task's authorization and branch protections. Never force-push over others' work.
+- For synchronized Story Studio, commit each tested milestone to `story-studio-shared` and update `docs/WORK_PROGRESS.md` before handoff. Merging to main requires explicit approval. Never force-push over others' work.
 - YouTube publishing, paid generation and sharing private content require the owner's explicit task authorization. Do not enable them as a test side effect.
 - Report exactly which checks ran, passed, failed or were blocked. A syntax check is not an end-to-end test.
 
